@@ -1,0 +1,16 @@
+1.0.0
+
+Release Date: 2026-01-23
+
+Version 1.0 - Initial Release
+=============================
+- Home Dashboard with basket overview
+- Basket Detail view with widgets
+- Calendar view with event filtering
+- Bloomberg-style dark theme
+- Centralized calculations module
+- Centralized data loader module
+- Support for S&P 500 AIR Futures strategies:
+  - Simple Carry
+  - Reverse Carry  
+  - Calendar Spread
