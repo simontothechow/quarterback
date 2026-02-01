@@ -65,6 +65,13 @@ with st.sidebar:
     st.markdown("### Display Options")
     show_expanded = st.checkbox("Expanded Shares View", value=False)
 
+    st.markdown("---")
+    st.markdown("### Navigation")
+    if st.button("📅 Calendar View", use_container_width=True):
+        st.switch_page("pages/2_📅_Calendar.py")
+    if st.button("🧾 Transactions", use_container_width=True):
+        st.switch_page("pages/4_🧾_Transactions_Menu.py")
+
 # Main content
 if selected_basket:
     basket_positions = get_basket_positions(positions_df, selected_basket)

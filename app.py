@@ -236,6 +236,9 @@ with st.sidebar:
     
     if st.button("📅 Calendar View", use_container_width=True):
         st.switch_page("pages/2_📅_Calendar.py")
+
+    if st.button("🧾 Transactions", use_container_width=True):
+        st.switch_page("pages/4_🧾_Transactions_Menu.py")
     
     st.markdown("---")
     

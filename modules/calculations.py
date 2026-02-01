@@ -595,6 +595,25 @@ def convert_to_bps(value: float, notional: float) -> float:
     return (value / abs(notional)) * 10_000
 
 
+def calculate_trade_value(shares: Union[int, float], price: Union[int, float]) -> float:
+    """
+    Calculate trade market value (absolute dollars).
+    
+    Used by the Transaction page to recompute estimated value when the user edits shares.
+    
+    Args:
+        shares: Number of shares (can be int or float; sign does not matter)
+        price: Price per share
+    
+    Returns:
+        Estimated trade value in USD (always non-negative)
+    """
+    try:
+        return abs(float(shares)) * float(price)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def format_currency(value: float, include_sign: bool = True) -> str:
     """
     Format a number as currency string.
