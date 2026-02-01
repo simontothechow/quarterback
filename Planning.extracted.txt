@@ -1,0 +1,145 @@
+QUARTERBACK TRADING SOFTWARE.
+
+
+I’m trying to build an application that will help me manage either a Cash and Carry or Reverse Cash and Carry strategy involving the S&P500 Adjustable Interest Rate (AIR) and TSX60 AIR Futures. 
+
+Your job is to work as my Business Analyst / Developer partner to help design a demo version of the application that I can show to my client.
+
+I’m using a fresh installation of python, the first step will be to help me get the necessary packages installed.
+
+After that I want us to plan together how to build the app. You’ll present a plan and ask me any questions where you need more info before proceeding to develop the app.
+
+Trading Strategy details:
+
+In “Simple Carry / Reverse Carry” where Futures are trading above their fair value, I will Sell the Future and Buy the 500 stocks of the S&P500 in precise weights in order to have 0 exposure to equity risk.
+Once the trade is put on, every time i receive a cash dividend from any of the stocks in the S&P500 it must be reinvested into SPY ETF right away. This is crucial in order to maintain my position of being fully hedged from equity risk.
+Reverse Carry is the opposite of the above.
+In some other cases I am also trying to harvest a mispricing that exists between 2 different Futures maturity dates. Call this Calendar Spread trading: 
+For example, assume Today is November and I am looking at futures that mature in January and in December. If January trading rich (futures pricing above what fair value suggests), I would sell January futures, and buy December futures for 1 month. When my December futures mature in December, then I go into the open market and buy the 500 stocks I need to perfectly hedge my Short January Futures position. Those stocks are held until the January futures mature, and then you close out the entire position (including selling all the shares) to lock in a spread that you earn above the Fed Funds rate. 
+In this Calendar Spread Trading situation described above, I have 4 parts of the trade I am trying to monitor together:
+Long December Futures (matures in december but exists for first part of the strategy)
+Short January Futures
+Borrow cash from the market at Fed Funds rate, use cash to go Long 500 stocks in correct S&P500 weights (bought in December when Dec futures mature)
+Additional Long stock positions that get added after initial share purchase. As Cash dividends from Physical stocks are received the cash must be reinvested to match equity exposure of AIR Futures.
+The trader has the option to reinvest into either SPY or to actually transact in the 500 stocks of the index.
+The final profit of the trade incorporates all the aspects:
+Cost of long December Futures and Short January futures
+Cost to borrow enough cash to buy 500 constituent equity positions
+Cost to transact and buy the 500 stocks
+Cost to reinvest dividends back into SP500 (either through SPY or buying shares of the 500 companies).
+There are several transactions involved in each of these trades. A group of trades that are all connected to eachother as part of this strategy I refer to as a “Basket”. All the trades belonging to a Basket will be tagged with a unique trade ID. Each basket can change during its life cycle and be rabalanced as needed in some cases with positions added and removed. A basket might consists of 1 or 2 futures trades, 500 equity positions, and some cash borrowing, etc. 
+
+Purpose of the Application:
+Fundamental to this trading strategy is ensuring that all equity exposure is fully hedged. Traders manage the strategy primarily at the Basket level to ensure that all market risk is totally hedged. All the equity risk should be hedged by being long(short) futures and short(long) physical equities. Rate risk and dividend risk are managed by the nature of AIR Futures.
+The biggest risk and cost to the strategy is maintaining your basket of physical stocks in perfect proportion to the Futures, and using data and transactions to maintain that perfectly hedged position throughout the life cycle of the trade.
+I am building an app i call “Quarterback” that allows you to run the whole trading strategy from within 1 application. It shows you all the information you need to know in terms of how your existing trades are performing. For now, it needs no functionality to identify new trading opportunities, just to maintain the active baskets that you already have.
+Quarterback will pull data from a few CSV files which I will provide (see Data Input section). In Phase 2 of development it will also be able to output files that can be used to instruct other trade booking systems such as bloomberg to automatically execute trades on the traders behalf.
+I am building a prototype Proof of Concept that i can show to my client to communicate what the software can do. The calculations need to be real but I will feed the app some Toy numbers of market data and my fake portfolio to get started. 
+
+User Interface Requirements:
+The GUI needs to be very attractive, clean, functional and easily readable for a trader. Just the information they need with no fluff.
+Stylistically you can follow the way Bloomberg terminal looks for inspiration.
+
+
+
+Technical Requirements for the Application:
+Python based using Streamlit for web based GUI. Relying on Pandas and Numpy packages as much as possible for data and calculation functions, following the notes below about calculation functions. You must ask me for approval before incorporating any packages that are not included in the Anaconda Python Distro
+All numerical calculations done to calculate the below KPIs and metrics should be contained in 1 easy to find place or module in the code base. All numerical calculations for these KPIs should be clearly defined as individual functions that i can test and refine later. A single function for each calculation should be used consistently throughout the app and it is crucial that these be easy for me to test and maintain as they are critical to the functioning of this application
+Define a function for all of the below calculations and use it consistently throughout the app:
+Profit and Loss
+Carry
+Estimated Daily Carry
+Accrued Carry to date
+Expected future Carry to Maturity
+Futures Equity Exposure
+Physical Equity Exposure
+Long Futures Notional
+Short Futures Notional
+Futures Theoretical price
+Number of shares needed to rebalance basket
+This function compares the current weight of a stock in the S&P500 to the traders portfolio of S&P500 stocks to see if there is a difference
+Any difference in weight between trader holdings and the S&P500 weights must be rebalanced
+Dv01 Exposure
+I am building a demo to show to a client using an theoretical portfolio. I want the demo to be web based so i can just give my client a URL and he can use the application there. I am providing a CSV file with the theoretical composition of the S&P500 with prices and weights that you can use in my demo.
+
+
+
+Requirements for using the app:
+
+Main Home Page: High level Dashboard of all your Baskets View: Trader can see all of the Baskets that he currently has in a GUI, it summarizes the following information for each basket:
+Start Date
+End date
+Underlying Index (S&P500 AIR, or TSX AIR)
+Summary of Current positions in each basket
+Long Futures Notional (show counterparty or exchange)
+Short Futures Notional (show counterparty or exchange)
+Physical Shares Notional 
+Cash Borrowing or Lending (show counterparty)
+Shares borrowing or lending (show counterparty)
+Additional shares purchased for Dividend reinvestment
+Total collateral pledged or received to support basket 
+Net Equity notional of the Basket 
+This should be close to 0 usually as the trader is actively working to maintain this hedge
+A significant non-zero Net Equity notional would trigger an alert for Transactions Required.
+Total carry of the trade accrued so far in BPs
+Expected total carry of the trade at maturity
+Current Profit (Loss) in BPS and in Dollar Value
+An Alert for “Transactions Required” Meaning that a transaction will be needed in the next 3 business days in order to rebalance the Basket due to an upcoming corporate action or some kind of maturity of one of the derivative trades in the basket
+Possible alerts:
+“Physical Share transaction Required”
+“Roll upcoming”
+“Maturity upcoming”
+“Collateral Movement”
+Specific Basket view
+From the home page, the Trader can click on a basket and then go to a more detailed page for that specific basket
+Trader can click a large Top Left “Back” Button to go back to Home page.
+The Specific Basket View breaks down each element of the basket separately in its own “Widget”. Not every basket will have all of these components, so its not necessary to show all of the widgets for each basket. For example, only show the “Borrowing/Lending” widget if a trade involves borrowing or lending. Otherwise, don’t show it.
+Widgets in Specific Basket View
+Whole Basket Summary
+Summarizes the aggregation of all the elements of the basket together. Uses information from the other widgets and nets it together and aggregates it to show KPIs performance of the whole Basket
+Key metrics: Total Equity Exposure, Total Rates Exposure, Total Carry Accrued, Daily Carry, Expected Carry to Maturity, Total Notional, Current PNL in BPs and in Dollars
+Derivatives (Long and Short Futures)
+Include info: 
+Trade ID, Start Date, Maturity Date
+Long/Short, Price, Theoretical price, Equity Delta Notional Exposure, PNL, Days to maturity, Rates DV01 exposure
+Underlying Equity index and Interest rate associated with the Adjustable Interest Rate Feature (SOFR for USA or CORRA for Canada) 
+Implied financing rate
+Carry accrued to date, Daily carry accrual, Expected carry to expiry
+Physical Shares (Long or Short Physical Shares)
+Since theres so many shares in the index, there should be an expanded and compacted view available.
+Compacted view: Shows a summary of physical share holdings, only shows specific Equities that are requiring a transaction in the next few days due to a corporate action
+
+Borrowing or Lending amount
+Adjusted Shares (shares or ETFs held Long or Short in order to rebalance the trade over time. As cash dividends are received on shares held they must be reinvested into Adjusted Shares).
+Calendar View
+From the Home Page, the trader can click on a big button at the Top “Calendar View” that opens a new page for Calendar View.
+Large “Back to Home” Button on upper left to go back to home page.
+Calendar view is kinda like Google Calendar but stripped down and just for this strategy. The trader doesn’t create events in the calendar themself, it is used to track his trades and notify him of upcoming events in trade life cycle, as well as upcoming corporate actions that affect his positions that would require him to make a transaction. 
+The calendar is generated automatically based on the life cycle data of existing trades, as well as data gleaned from the corpactions.csv input file that has the schedule of upcoming corporate actions on all of the major equity indexes that are traded in this strategy. That calendar data will be discussed later in the data input section 
+Left of the main calendar is a filter section where you can filter for which basket you want to see represented in the calendar. I.e. maybe you want to see the events for all of your trades in the calendar, maybe just for Baskets 1 and 4, maybe just Basket 2,
+Also filterable by underlying index - filters for any events related to either the SP500 AIR or TSX AIR futures.
+Events shown include:
+Cash dividend on any stock contained in the SP500 or TSX
+Shown as “Ticker Symbol - Cash Div”
+I.e. “AAPL - Cash Div
+Any element of a basket maturing or rolling to a later maturity
+I.e. futures maturity, borrowing maturity, stock loan maturity, etc.
+Corporate actions
+Could be a takeover, stock split, merger, acquisition
+Index composition changes
+Stocks being added or removed from the S&P500 or TSX60 index by the index creator.
+Any other event that would require the trader to take an action
+
+Data inputs:
+We are building just a demo version of the app for now. The final version will be connected to a few live or intraday data sources where it will receive 3 key types of data:
+Positions data for existing positions
+Market data about pricing for stocks and futures and interest rates
+Corporate action and calendar data that tells us upcoming events in the calendar.
+The infrastructure of the app should be built such that the sources of data can easily be changed later
+Create a unique function to load and process each dataset from each file. Centralize these functions in 1 module or location (1 function for each dataset with a data_load module) in the code base to make it easy for me to change or maintain later when i get real intraday data from the client. 
+In the demo version of this app, I have made 4 CSV files that you can take data from for now for testing/demo purposes:
+Positions.csv - I created 3 fake baskets in this file which I want you to populate into the demo version of the app
+stockmarketdata.csv - has information on the price and weights of the S&P500 constituents
+Key data fields to use in the app: COMPANY, CURRENCY, CUSIP, BLOOMBERG_TICKER, LOCAL_PRICE, MARKET_CAP, IWF, INDEX_SHARES, 
+Corpactions.csv - file that has upcoming corporate actions that will be displayed in the Calendar view 
+Key data fields to use in app:  FILE_DATE, EFFECTIVE_DATE, CURRENT_TICKER, CURRENT_CUSIP, CURRENT_BLOOMBERG_TICKER, NET_DIVIDEND, ACTION_TYPE, DIVIDEND, ACTION_GROUP, STATUS, INDEX_SHARES_PRIOR_EVENTS, INDEX_SHARES_POST_EVENTS, DIVIDEND_CURRENCY, CURRENT_TAX_RATE, COMMENTS 

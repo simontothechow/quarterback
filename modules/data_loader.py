@@ -47,7 +47,8 @@ def load_positions(file_path: Optional[str] = None) -> pd.DataFrame:
     """
     if file_path is None:
         # Use the new positions file with physical equities
-        file_path = DATA_PATH.parent / "positions_physicalequities.csv"
+        # NOTE: Keep filename casing consistent (important on Linux / Streamlit Cloud).
+        file_path = DATA_PATH.parent / "Positions_physicalequities.csv"
     
     df = pd.read_csv(file_path)
     
@@ -358,8 +359,7 @@ def get_stock_borrow_positions(positions_df: pd.DataFrame, basket_id: str) -> pd
         DataFrame with stock borrow positions for the basket
     """
     mask = (positions_df['BASKET_ID'] == basket_id) & \
-           (positions_df['POSITION_TYPE'] == 'STOCK_BORROW') & \
-           (positions_df['QUANTITY'] != 'AGGREGATE')  # Exclude aggregate row
+           (positions_df['POSITION_TYPE'] == 'STOCK_BORROW')
     return positions_df[mask].copy()
 
 
