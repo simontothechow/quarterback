@@ -12,7 +12,7 @@ Each function should be used consistently throughout the app.
 
 import pandas as pd
 import numpy as np
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional, Union, Tuple
 
 # Constants
@@ -1149,3 +1149,130 @@ def calculate_event_trade_recommendations(
         })
     
     return recommendations
+
+
+def calculate_basket_calendar_trade_recommendations(
+    basket_id: str,
+    positions_df: pd.DataFrame,
+    corp_actions_df: pd.DataFrame,
+    market_data_df: pd.DataFrame,
+    days_back: int = 120,
+    days_forward: int = 365,
+    max_events: int = 25,
+) -> list:
+    """
+    For a given basket, find relevant corporate actions and produce actionable trade recommendations.
+    
+    This is used by the Basket Detail "Calendar Events" widget to unify calendar + basket context.
+    In the demo, these recommendations are assumed to be forward-starting and use the event
+    effective date as the execution date.
+    
+    Notes:
+    - Currently focuses on corporate actions with index share changes (i.e., those that generate
+      trade recommendations via calculate_event_trade_recommendations()).
+    - Filters to tickers actually held in the basket's EQUITY positions.
+    
+    Args:
+        basket_id: Basket identifier (e.g., "Basket1")
+        positions_df: Full positions dataframe (all baskets)
+        corp_actions_df: Corporate actions dataframe
+        market_data_df: Market data dataframe (for COMPANY, PRICE, weights)
+        days_back: Include events this many days before today (demo-friendly "pretend date" window)
+        days_forward: Include events this many days after today
+        max_events: Max number of actionable recommendations to return
+    
+    Returns:
+        List of dictionaries with event + trade recommendation fields.
+    """
+    if (
+        positions_df is None
+        or positions_df.empty
+        or corp_actions_df is None
+        or corp_actions_df.empty
+        or not basket_id
+    ):
+        return []
+
+    # Basket tickers (only positions actually held)
+    basket_positions = positions_df[positions_df["BASKET_ID"] == basket_id]
+    basket_equities = basket_positions[basket_positions["POSITION_TYPE"] == "EQUITY"]
+    if basket_equities.empty:
+        return []
+
+    tickers = (
+        basket_equities.get("UNDERLYING", pd.Series([], dtype=str))
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+    if not tickers:
+        return []
+
+    # Company lookup (optional)
+    company_lookup = {}
+    if market_data_df is not None and not market_data_df.empty:
+        if "BLOOMBERG_TICKER" in market_data_df.columns and "COMPANY" in market_data_df.columns:
+            for _, r in market_data_df[["BLOOMBERG_TICKER", "COMPANY"]].dropna().iterrows():
+                company_lookup[str(r["BLOOMBERG_TICKER"])] = str(r["COMPANY"])
+
+    # Time window (demo-friendly; includes some recent past so Dec 2025 shows up in Feb 2026)
+    today = datetime.now().date()
+    start_date = today - timedelta(days=days_back)
+    end_date = today + timedelta(days=days_forward)
+
+    df = corp_actions_df.copy()
+    if "EFFECTIVE_DATE" not in df.columns:
+        return []
+
+    df["EFFECTIVE_DATE"] = pd.to_datetime(df["EFFECTIVE_DATE"], errors="coerce")
+    df = df[df["EFFECTIVE_DATE"].notna()]
+    df = df[(df["EFFECTIVE_DATE"].dt.date >= start_date) & (df["EFFECTIVE_DATE"].dt.date <= end_date)]
+
+    # Only events for tickers in this basket (use Bloomberg ticker field first)
+    if "CURRENT_BLOOMBERG_TICKER" in df.columns:
+        df = df[df["CURRENT_BLOOMBERG_TICKER"].astype(str).isin(tickers)]
+    elif "CURRENT_TICKER" in df.columns:
+        df = df[df["CURRENT_TICKER"].astype(str).isin(tickers)]
+    else:
+        return []
+
+    # Build actionable recommendations for this basket only
+    out = []
+    for _, row in df.sort_values("EFFECTIVE_DATE").iterrows():
+        event = row.to_dict()
+        recs = calculate_event_trade_recommendations(event, positions_df, market_data_df)
+        for rec in recs:
+            if rec.get("basket_id") != basket_id:
+                continue
+            if rec.get("action") not in ("BUY", "SELL"):
+                continue
+
+            # Effective date as forward-start execution date
+            eff_date = pd.Timestamp(row["EFFECTIVE_DATE"]).date()
+            execution_date = eff_date.strftime("%Y-%m-%d")
+
+            ticker = rec.get("ticker", "")
+            out.append(
+                {
+                    "basket_id": basket_id,
+                    "ticker": ticker,
+                    "company": company_lookup.get(str(ticker), ""),
+                    "event_type": str(row.get("ACTION_TYPE", row.get("ACTION_GROUP", "Corporate Action"))),
+                    "effective_date": execution_date,
+                    "comments": str(row.get("COMMENTS", "") or "")[:120],
+                    # Trade recommendation fields
+                    "action": rec.get("action"),
+                    "shares": int(rec.get("shares_diff", 0) or 0),
+                    "price": float(rec.get("price", 0) or 0),
+                    "value": float(rec.get("trade_value", 0) or 0),
+                    "current_shares": int(rec.get("current_shares", 0) or 0),
+                    "target_shares": int(rec.get("target_shares", 0) or 0),
+                    "execution_date": execution_date,
+                }
+            )
+
+        if len(out) >= max_events:
+            break
+
+    return out

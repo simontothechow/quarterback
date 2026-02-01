@@ -18,7 +18,8 @@ from modules.data_loader import (
 from components.theme import apply_theme, COLORS
 from components.widgets import (
     render_whole_basket_summary, render_derivatives_widget,
-    render_physical_shares_widget, render_borrowing_lending_widget
+    render_physical_shares_widget, render_borrowing_lending_widget,
+    render_calendar_events_widget
 )
 
 # Page configuration
@@ -109,6 +110,15 @@ if selected_basket:
             corp_actions,
             basket_id=selected_basket,
             expanded=show_expanded
+        )
+
+        # Calendar Events widget (actionable forward-start recommendations)
+        st.markdown("---")
+        render_calendar_events_widget(
+            all_positions_df=positions_df,
+            stock_data=stock_data,
+            corp_actions=corp_actions,
+            basket_id=selected_basket,
         )
         
     else:

@@ -13,7 +13,8 @@ from modules.calculations import (
     calculate_basket_metrics, calculate_days_to_maturity,
     format_currency, format_bps, calculate_dv01,
     get_rebalancing_alerts, calculate_equity_basket_summary,
-    calculate_rebalancing_needs
+    calculate_rebalancing_needs,
+    calculate_basket_calendar_trade_recommendations
 )
 from components.theme import (
     COLORS, format_value_with_color, render_alert_badge, render_status_badge
@@ -387,6 +388,99 @@ def render_physical_shares_widget(positions_df: pd.DataFrame,
             )
         else:
             st.info("No position data available")
+
+
+def render_calendar_events_widget(
+    all_positions_df: pd.DataFrame,
+    stock_data: pd.DataFrame,
+    corp_actions: pd.DataFrame,
+    basket_id: str,
+) -> None:
+    """
+    Render a Basket Detail widget that unifies calendar events and trade recommendations.
+    
+    For demo purposes, all trades scheduled from this widget are forward-starting and use
+    the event effective date as the execution date.
+    """
+    st.markdown("""
+        <div style="background-color: #252525; padding: 0.5rem 1rem; border-radius: 4px; margin-bottom: 1rem;">
+            <span style="color: #ff8c00; font-weight: 600;">🗓 CALENDAR EVENTS</span>
+        </div>
+    """, unsafe_allow_html=True)
+
+    recs = calculate_basket_calendar_trade_recommendations(
+        basket_id=basket_id,
+        positions_df=all_positions_df,
+        corp_actions_df=corp_actions,
+        market_data_df=stock_data,
+    )
+
+    if not recs:
+        st.info("No actionable calendar events found for this basket.")
+        return
+
+    # Header row
+    header_cols = st.columns([2, 2, 2, 3, 2])
+    headers = ["Ticker / Company", "Event Type", "Effective Date", "Recommendation", "Action"]
+    for col, label in zip(header_cols, headers):
+        with col:
+            st.markdown(
+                f"<div style='color:#808080; font-size:0.8rem; text-transform:uppercase; font-weight:600; padding:0.25rem 0;'>{label}</div>",
+                unsafe_allow_html=True,
+            )
+    st.markdown("<div style='border-bottom: 1px solid #333; margin: 0.25rem 0 0.75rem 0;'></div>", unsafe_allow_html=True)
+
+    for i, r in enumerate(recs):
+        action = str(r.get("action", "NONE"))
+        if action not in ("BUY", "SELL"):
+            continue
+
+        btn_label = "Schedule Buy" if action == "BUY" else "Schedule Sell"
+        shares = int(r.get("shares", 0) or 0)
+        ticker = r.get("ticker", "N/A")
+        company = r.get("company", "")
+        event_type = r.get("event_type", "Corporate Action")
+        eff_date = r.get("effective_date", "")
+        price = float(r.get("price", 0) or 0)
+        value = float(r.get("value", 0) or 0)
+        current_shares = int(r.get("current_shares", 0) or 0)
+        target_shares = int(r.get("target_shares", 0) or 0)
+
+        rec_text = f"{action} {shares:,} shares on {eff_date} @ ${price:,.2f} (≈ ${value:,.0f})"
+
+        cols = st.columns([2, 2, 2, 3, 2])
+        with cols[0]:
+            st.markdown(f"**{ticker}**")
+            if company:
+                st.caption(company)
+        with cols[1]:
+            st.markdown(event_type)
+        with cols[2]:
+            st.markdown(eff_date)
+        with cols[3]:
+            st.markdown(rec_text)
+            comments = str(r.get("comments", "") or "").strip()
+            if comments:
+                st.caption(comments)
+        with cols[4]:
+            if st.button(btn_label, key=f"cal_evt_{basket_id}_{ticker}_{i}", use_container_width=True):
+                # Store transaction details (forward-start execution_date from event)
+                st.session_state["pending_transaction"] = {
+                    "ticker": ticker,
+                    "action": action,
+                    "shares": shares,
+                    "price": price,
+                    "value": value,
+                    "current_shares": current_shares,
+                    "target_shares": target_shares,
+                    "basket_id": basket_id,
+                    "execution_date": eff_date,
+                    "event_date": eff_date,
+                    "source": "basket_calendar_widget",
+                }
+                st.switch_page("pages/3_💱_Transaction.py")
+
+        st.markdown("<div style='margin: 0.5rem 0; border-bottom: 1px solid #333;'></div>", unsafe_allow_html=True)
 
 
 def render_borrowing_lending_widget(positions_df: pd.DataFrame) -> None:
