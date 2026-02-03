@@ -96,11 +96,11 @@ if selected_basket:
         
         with col1:
             # Derivatives widget
-            render_derivatives_widget(basket_positions)
+            render_derivatives_widget(basket_positions, basket_id=selected_basket)
         
         with col2:
             # Borrowing/Lending widget
-            render_borrowing_lending_widget(basket_positions)
+            render_borrowing_lending_widget(basket_positions, basket_id=selected_basket)
         
         # Physical shares widget (full width)
         st.markdown("---")

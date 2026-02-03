@@ -14,7 +14,11 @@ from modules.calculations import (
     format_currency, format_bps, calculate_dv01,
     get_rebalancing_alerts, calculate_equity_basket_summary,
     calculate_rebalancing_needs,
-    calculate_basket_calendar_trade_recommendations
+    calculate_basket_calendar_trade_recommendations,
+    calculate_basket_component_totals,
+    calculate_unwind_trades_futures,
+    calculate_unwind_trades_cash,
+    calculate_unwind_trades_stock_borrow,
 )
 from components.theme import (
     COLORS, format_value_with_color, render_alert_badge, render_status_badge
@@ -113,12 +117,13 @@ def render_basket_summary_widget(basket_id: str, positions_df: pd.DataFrame) -> 
                 """, unsafe_allow_html=True)
 
 
-def render_derivatives_widget(positions_df: pd.DataFrame) -> None:
+def render_derivatives_widget(positions_df: pd.DataFrame, basket_id: str = "") -> None:
     """
     Render the derivatives (futures) widget for basket detail view.
     
     Args:
         positions_df: DataFrame with positions (will filter for futures)
+        basket_id: The basket identifier for transaction routing
     """
     futures_df = positions_df[positions_df['POSITION_TYPE'] == 'FUTURE'].copy()
     
@@ -126,11 +131,35 @@ def render_derivatives_widget(positions_df: pd.DataFrame) -> None:
         st.info("No futures positions in this basket")
         return
     
-    st.markdown("""
-        <div style="background-color: #252525; padding: 0.5rem 1rem; border-radius: 4px; margin-bottom: 1rem;">
-            <span style="color: #ff8c00; font-weight: 600;">📊 DERIVATIVES</span>
-        </div>
-    """, unsafe_allow_html=True)
+    # Header with Unwind/Resize buttons
+    header_col, btn_col1, btn_col2 = st.columns([4, 1, 1])
+    
+    with header_col:
+        st.markdown("""
+            <div style="background-color: #252525; padding: 0.5rem 1rem; border-radius: 4px;">
+                <span style="color: #ff8c00; font-weight: 600;">📊 DERIVATIVES</span>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with btn_col1:
+        if st.button("Unwind", key=f"unwind_futures_{basket_id}", use_container_width=True):
+            st.session_state['pending_futures_transaction'] = {
+                'basket_id': basket_id,
+                'mode': 'unwind',
+                'positions_df': positions_df,
+            }
+            st.switch_page("pages/5_📊_Futures_Transaction.py")
+    
+    with btn_col2:
+        if st.button("Resize", key=f"resize_futures_{basket_id}", use_container_width=True):
+            st.session_state['pending_futures_transaction'] = {
+                'basket_id': basket_id,
+                'mode': 'resize',
+                'positions_df': positions_df,
+            }
+            st.switch_page("pages/5_📊_Futures_Transaction.py")
+    
+    st.markdown("<div style='margin-bottom: 1rem;'></div>", unsafe_allow_html=True)
     
     for _, pos in futures_df.iterrows():
         direction = pos.get('LONG_SHORT', 'N/A')
@@ -217,6 +246,7 @@ def render_physical_shares_widget(positions_df: pd.DataFrame,
     
     Shows:
     - Summary tab with total market value, PNL, position count
+    - Unwind/Resize buttons for the entire equity basket
     - Rebalancing alerts as clickable buttons
     - Expanded view with full positions table
     
@@ -246,12 +276,37 @@ def render_physical_shares_widget(positions_df: pd.DataFrame,
     pnl = summary['total_pnl']
     pnl_color = COLORS['accent_green'] if pnl >= 0 else COLORS['accent_red']
     
-    # Header
-    st.markdown("""
-        <div style="background-color: #252525; padding: 0.5rem 1rem; border-radius: 4px; margin-bottom: 1rem;">
-            <span style="color: #ff8c00; font-weight: 600;">📈 PHYSICAL EQUITIES</span>
-        </div>
-    """, unsafe_allow_html=True)
+    # Header with Unwind/Resize buttons
+    eq_header_col, eq_btn1, eq_btn2 = st.columns([4, 1, 1])
+    
+    with eq_header_col:
+        st.markdown("""
+            <div style="background-color: #252525; padding: 0.5rem 1rem; border-radius: 4px;">
+                <span style="color: #ff8c00; font-weight: 600;">📈 PHYSICAL EQUITIES</span>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with eq_btn1:
+        if st.button("Unwind", key=f"unwind_equities_{basket_id}", use_container_width=True):
+            st.session_state['pending_equity_transaction'] = {
+                'basket_id': basket_id,
+                'mode': 'unwind',
+                'position_type': 'EQUITY',
+                'positions_df': positions_df,
+            }
+            st.switch_page("pages/7_📈_Equity_Transaction.py")
+    
+    with eq_btn2:
+        if st.button("Resize", key=f"resize_equities_{basket_id}", use_container_width=True):
+            st.session_state['pending_equity_transaction'] = {
+                'basket_id': basket_id,
+                'mode': 'resize',
+                'position_type': 'EQUITY',
+                'positions_df': positions_df,
+            }
+            st.switch_page("pages/7_📈_Equity_Transaction.py")
+    
+    st.markdown("<div style='margin-bottom: 1rem;'></div>", unsafe_allow_html=True)
     
     # Summary card
     st.markdown(f"""
@@ -483,16 +538,17 @@ def render_calendar_events_widget(
         st.markdown("<div style='margin: 0.5rem 0; border-bottom: 1px solid #333;'></div>", unsafe_allow_html=True)
 
 
-def render_borrowing_lending_widget(positions_df: pd.DataFrame) -> None:
+def render_borrowing_lending_widget(positions_df: pd.DataFrame, basket_id: str = "") -> None:
     """
     Render the borrowing/lending widget for basket detail view.
     
     Shows:
-    - Cash Borrow/Lend as individual entries
-    - Stock Borrows aggregated into a summary with expandable table
+    - Cash Borrow/Lend as individual entries with Unwind/Resize buttons
+    - Stock Borrows aggregated into a summary with expandable table and Unwind/Resize buttons
     
     Args:
         positions_df: DataFrame with positions
+        basket_id: The basket identifier for transaction routing
     """
     # Filter for cash borrow/lend and stock borrow
     borrow_lend_types = ['CASH_BORROW', 'CASH_LEND', 'STOCK_BORROW']
@@ -511,8 +567,8 @@ def render_borrowing_lending_widget(positions_df: pd.DataFrame) -> None:
     cash_positions = bl_df[bl_df['POSITION_TYPE'].isin(['CASH_BORROW', 'CASH_LEND'])]
     stock_borrows = bl_df[bl_df['POSITION_TYPE'] == 'STOCK_BORROW'].copy()
     
-    # Render Cash Borrow/Lend positions individually
-    for _, pos in cash_positions.iterrows():
+    # Render Cash Borrow/Lend positions individually with Unwind/Resize buttons
+    for idx, pos in cash_positions.iterrows():
         pos_type = pos.get('POSITION_TYPE', 'N/A')
         
         if pos_type == 'CASH_BORROW':
@@ -531,10 +587,13 @@ def render_borrowing_lending_widget(positions_df: pd.DataFrame) -> None:
         
         pnl_color = COLORS['accent_green'] if pnl >= 0 else COLORS['accent_red']
         
-        st.markdown(f"""
-            <div style="background-color: #1e1e1e; border: 1px solid #333; border-radius: 4px; 
-                        padding: 1rem; margin-bottom: 0.75rem;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 0.75rem;">
+        # Header row with Unwind/Resize buttons
+        cash_header_col, cash_btn1, cash_btn2 = st.columns([4, 1, 1])
+        
+        with cash_header_col:
+            st.markdown(f"""
+                <div style="background-color: #1e1e1e; border: 1px solid #333; border-radius: 4px 4px 0 0; 
+                            padding: 0.75rem 1rem; display: flex; justify-content: space-between;">
                     <div>
                         <span style="font-size: 1.1rem;">{icon}</span>
                         <span style="color: #fff; margin-left: 0.5rem; font-weight: 600;">{label}</span>
@@ -544,6 +603,31 @@ def render_borrowing_lending_widget(positions_df: pd.DataFrame) -> None:
                         <span style="color: {pnl_color}; font-weight: 600;">{format_currency(pnl)}</span>
                     </div>
                 </div>
+            """, unsafe_allow_html=True)
+        
+        with cash_btn1:
+            if st.button("Unwind", key=f"unwind_cash_{basket_id}_{pos_type}_{idx}", use_container_width=True):
+                st.session_state['pending_cash_transaction'] = {
+                    'basket_id': basket_id,
+                    'mode': 'unwind',
+                    'position_type': pos_type,
+                    'positions_df': positions_df,
+                }
+                st.switch_page("pages/6_💰_Cash_Transaction.py")
+        
+        with cash_btn2:
+            if st.button("Resize", key=f"resize_cash_{basket_id}_{pos_type}_{idx}", use_container_width=True):
+                st.session_state['pending_cash_transaction'] = {
+                    'basket_id': basket_id,
+                    'mode': 'resize',
+                    'position_type': pos_type,
+                    'positions_df': positions_df,
+                }
+                st.switch_page("pages/6_💰_Cash_Transaction.py")
+        
+        st.markdown(f"""
+            <div style="background-color: #1e1e1e; border: 1px solid #333; border-top: none; border-radius: 0 0 4px 4px; 
+                        padding: 1rem; margin-bottom: 0.75rem;">
                 <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; font-size: 0.85rem;">
                     <div>
                         <div style="color: #808080;">Notional</div>
@@ -565,7 +649,7 @@ def render_borrowing_lending_widget(positions_df: pd.DataFrame) -> None:
             </div>
         """, unsafe_allow_html=True)
     
-    # Render Stock Borrows as aggregated summary with expandable table
+    # Render Stock Borrows as aggregated summary with expandable table and Unwind/Resize buttons
     if not stock_borrows.empty:
         # Convert numeric columns
         stock_borrows['QUANTITY'] = pd.to_numeric(stock_borrows['QUANTITY'], errors='coerce').fillna(0)
@@ -584,11 +668,13 @@ def render_borrowing_lending_widget(positions_df: pd.DataFrame) -> None:
         
         pnl_color = COLORS['accent_green'] if total_pnl >= 0 else COLORS['accent_red']
         
-        # Summary card for stock borrows
-        st.markdown(f"""
-            <div style="background-color: #1e1e1e; border: 1px solid #333; border-radius: 4px; 
-                        padding: 1rem; margin-bottom: 0.75rem;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 0.75rem;">
+        # Header row with Unwind/Resize buttons for Stock Borrow
+        sb_header_col, sb_btn1, sb_btn2 = st.columns([4, 1, 1])
+        
+        with sb_header_col:
+            st.markdown(f"""
+                <div style="background-color: #1e1e1e; border: 1px solid #333; border-radius: 4px 4px 0 0; 
+                            padding: 0.75rem 1rem; display: flex; justify-content: space-between;">
                     <div>
                         <span style="font-size: 1.1rem;">📊</span>
                         <span style="color: #fff; margin-left: 0.5rem; font-weight: 600;">Stock Borrowing</span>
@@ -599,6 +685,32 @@ def render_borrowing_lending_widget(positions_df: pd.DataFrame) -> None:
                         <span style="color: {pnl_color}; font-weight: 600;">{format_currency(total_pnl)}</span>
                     </div>
                 </div>
+            """, unsafe_allow_html=True)
+        
+        with sb_btn1:
+            if st.button("Unwind", key=f"unwind_stock_borrow_{basket_id}", use_container_width=True):
+                st.session_state['pending_equity_transaction'] = {
+                    'basket_id': basket_id,
+                    'mode': 'unwind',
+                    'position_type': 'STOCK_BORROW',
+                    'positions_df': positions_df,
+                }
+                st.switch_page("pages/7_📈_Equity_Transaction.py")
+        
+        with sb_btn2:
+            if st.button("Resize", key=f"resize_stock_borrow_{basket_id}", use_container_width=True):
+                st.session_state['pending_equity_transaction'] = {
+                    'basket_id': basket_id,
+                    'mode': 'resize',
+                    'position_type': 'STOCK_BORROW',
+                    'positions_df': positions_df,
+                }
+                st.switch_page("pages/7_📈_Equity_Transaction.py")
+        
+        # Summary card for stock borrows (body)
+        st.markdown(f"""
+            <div style="background-color: #1e1e1e; border: 1px solid #333; border-top: none; border-radius: 0 0 4px 4px; 
+                        padding: 1rem; margin-bottom: 0.75rem;">
                 <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; font-size: 0.85rem;">
                     <div>
                         <div style="color: #808080;">Total Market Value</div>
@@ -648,6 +760,8 @@ def render_whole_basket_summary(basket_id: str, positions_df: pd.DataFrame) -> N
     """
     Render the whole basket summary widget showing aggregated KPIs.
     
+    Includes "Unwind All" and "Resize All" buttons for full basket operations.
+    
     Args:
         basket_id: The basket identifier
         positions_df: DataFrame with all positions for this basket
@@ -655,21 +769,47 @@ def render_whole_basket_summary(basket_id: str, positions_df: pd.DataFrame) -> N
     metrics = calculate_basket_metrics(positions_df)
     strategy_type = positions_df['STRATEGY_TYPE'].iloc[0] if 'STRATEGY_TYPE' in positions_df.columns else "Unknown"
     
-    st.markdown(f"""
-        <div style="background-color: #1a1a1a; border: 2px solid #ff8c00; border-radius: 6px; 
-                    padding: 1.25rem; margin-bottom: 1.5rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <div>
-                    <span style="color: #ff8c00; font-size: 1.5rem; font-weight: 700;">{basket_id}</span>
-                    <span style="color: #808080; margin-left: 1rem; font-size: 1rem;">{strategy_type}</span>
-                </div>
-                <div style="text-align: right;">
-                    <span style="color: #808080;">Total Notional: </span>
-                    <span style="color: #fff; font-size: 1.25rem; font-weight: 600;">${metrics['total_notional']:,.0f}</span>
+    # Header row with basket info and action buttons
+    header_col, btn_col1, btn_col2 = st.columns([4, 1, 1])
+    
+    with header_col:
+        st.markdown(f"""
+            <div style="background-color: #1a1a1a; border: 2px solid #ff8c00; border-radius: 6px; 
+                        padding: 1.25rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <span style="color: #ff8c00; font-size: 1.5rem; font-weight: 700;">{basket_id}</span>
+                        <span style="color: #808080; margin-left: 1rem; font-size: 1rem;">{strategy_type}</span>
+                    </div>
+                    <div style="text-align: right;">
+                        <span style="color: #808080;">Total Notional: </span>
+                        <span style="color: #fff; font-size: 1.25rem; font-weight: 600;">${metrics['total_notional']:,.0f}</span>
+                    </div>
                 </div>
             </div>
-        </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+    
+    with btn_col1:
+        st.markdown("<div style='height: 0.5rem;'></div>", unsafe_allow_html=True)
+        if st.button("🔄 Unwind All", key=f"unwind_all_{basket_id}", use_container_width=True, type="primary"):
+            st.session_state['pending_basket_transaction'] = {
+                'basket_id': basket_id,
+                'mode': 'unwind',
+                'positions_df': positions_df,
+            }
+            st.switch_page("pages/8_🎯_Basket_Transaction.py")
+    
+    with btn_col2:
+        st.markdown("<div style='height: 0.5rem;'></div>", unsafe_allow_html=True)
+        if st.button("📐 Resize All", key=f"resize_all_{basket_id}", use_container_width=True, type="secondary"):
+            st.session_state['pending_basket_transaction'] = {
+                'basket_id': basket_id,
+                'mode': 'resize',
+                'positions_df': positions_df,
+            }
+            st.switch_page("pages/8_🎯_Basket_Transaction.py")
+    
+    st.markdown("<div style='margin-bottom: 1rem;'></div>", unsafe_allow_html=True)
     
     # Key metrics in columns
     col1, col2, col3, col4 = st.columns(4)

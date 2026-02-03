@@ -1151,6 +1151,762 @@ def calculate_event_trade_recommendations(
     return recommendations
 
 
+# =============================================================================
+# UNWIND / RESIZE CALCULATION FUNCTIONS
+# =============================================================================
+
+# SPX AIR Futures contract multiplier
+SPX_FUTURES_MULTIPLIER = 25
+
+
+def calculate_futures_contracts_from_notional(
+    notional: float,
+    futures_price: float,
+    multiplier: float = SPX_FUTURES_MULTIPLIER
+) -> float:
+    """
+    Calculate number of futures contracts from a notional amount.
+    
+    Formula: contracts = notional / (futures_price × multiplier)
+    
+    Args:
+        notional: Target notional in USD (positive for long, negative for short)
+        futures_price: Current futures price level
+        multiplier: Contract multiplier (default 25 for SPX AIR)
+    
+    Returns:
+        Number of contracts (positive for long, negative for short)
+    """
+    if futures_price <= 0 or multiplier <= 0:
+        return 0.0
+    
+    contracts = notional / (futures_price * multiplier)
+    return contracts
+
+
+def calculate_notional_from_contracts(
+    contracts: float,
+    futures_price: float,
+    multiplier: float = SPX_FUTURES_MULTIPLIER
+) -> float:
+    """
+    Calculate notional amount from number of futures contracts.
+    
+    Formula: notional = contracts × futures_price × multiplier
+    
+    Args:
+        contracts: Number of contracts (positive for long, negative for short)
+        futures_price: Current futures price level
+        multiplier: Contract multiplier (default 25 for SPX AIR)
+    
+    Returns:
+        Notional in USD
+    """
+    return contracts * futures_price * multiplier
+
+
+def calculate_unwind_trades_futures(
+    positions_df: pd.DataFrame,
+    basket_id: str
+) -> list:
+    """
+    Calculate trades to fully unwind all futures positions in a basket.
+    
+    Unwind = opposite direction trade to close position.
+    
+    Args:
+        positions_df: DataFrame with all positions
+        basket_id: Basket identifier
+    
+    Returns:
+        List of trade dictionaries with: ticker, action, contracts, notional, price
+    """
+    trades = []
+    
+    futures_mask = (positions_df['BASKET_ID'] == basket_id) & \
+                   (positions_df['POSITION_TYPE'] == 'FUTURE')
+    futures_positions = positions_df[futures_mask]
+    
+    for _, pos in futures_positions.iterrows():
+        current_notional = pos.get('NOTIONAL_USD', 0) or 0
+        current_quantity = pos.get('QUANTITY', 0) or 0
+        price = pos.get('PRICE_OR_LEVEL', 0) or 0
+        direction = pos.get('LONG_SHORT', '')
+        contract_month = pos.get('CONTRACT_MONTH', '')
+        instrument = pos.get('INSTRUMENT_NAME', 'SPX Futures')
+        
+        # Unwind = flip the sign
+        unwind_notional = -1 * current_notional
+        unwind_contracts = -1 * current_quantity
+        
+        # Determine action based on unwind direction
+        if unwind_notional > 0:
+            action = 'BUY'
+        elif unwind_notional < 0:
+            action = 'SELL'
+        else:
+            action = 'NONE'
+        
+        trades.append({
+            'position_id': pos.get('POSITION_ID', ''),
+            'instrument': instrument,
+            'contract_month': contract_month,
+            'ticker': f"SPX {contract_month}",
+            'action': action,
+            'contracts': int(round(abs(unwind_contracts))),
+            'contracts_signed': int(round(unwind_contracts)),
+            'notional': unwind_notional,
+            'price': price,
+            'current_notional': current_notional,
+            'current_contracts': int(current_quantity),
+            'current_direction': direction,
+            'basket_id': basket_id,
+            'position_type': 'FUTURE',
+        })
+    
+    return trades
+
+
+def calculate_resize_trades_futures(
+    positions_df: pd.DataFrame,
+    basket_id: str,
+    transaction_notional: float
+) -> list:
+    """
+    Calculate trades to resize futures positions by a given notional amount.
+    
+    Transaction notional:
+        - Positive = buying (going more long / reducing short)
+        - Negative = selling (going more short / reducing long)
+    
+    Args:
+        positions_df: DataFrame with all positions
+        basket_id: Basket identifier
+        transaction_notional: The notional change to apply (signed)
+    
+    Returns:
+        List of trade dictionaries
+    """
+    trades = []
+    
+    futures_mask = (positions_df['BASKET_ID'] == basket_id) & \
+                   (positions_df['POSITION_TYPE'] == 'FUTURE')
+    futures_positions = positions_df[futures_mask]
+    
+    # If multiple futures positions, split proportionally by current notional
+    total_notional = abs(futures_positions['NOTIONAL_USD'].sum())
+    
+    for _, pos in futures_positions.iterrows():
+        current_notional = pos.get('NOTIONAL_USD', 0) or 0
+        price = pos.get('PRICE_OR_LEVEL', 0) or 0
+        direction = pos.get('LONG_SHORT', '')
+        contract_month = pos.get('CONTRACT_MONTH', '')
+        instrument = pos.get('INSTRUMENT_NAME', 'SPX Futures')
+        current_quantity = pos.get('QUANTITY', 0) or 0
+        
+        # Proportional allocation if multiple futures
+        if total_notional > 0 and len(futures_positions) > 1:
+            proportion = abs(current_notional) / total_notional
+            pos_transaction_notional = transaction_notional * proportion
+        else:
+            pos_transaction_notional = transaction_notional
+        
+        # Calculate contracts from notional
+        transaction_contracts = calculate_futures_contracts_from_notional(
+            pos_transaction_notional, price
+        )
+        
+        # Determine action
+        if pos_transaction_notional > 0:
+            action = 'BUY'
+        elif pos_transaction_notional < 0:
+            action = 'SELL'
+        else:
+            action = 'NONE'
+        
+        # Calculate new position
+        new_notional = current_notional + pos_transaction_notional
+        new_contracts = current_quantity + transaction_contracts
+        
+        trades.append({
+            'position_id': pos.get('POSITION_ID', ''),
+            'instrument': instrument,
+            'contract_month': contract_month,
+            'ticker': f"SPX {contract_month}",
+            'action': action,
+            'contracts': int(round(abs(transaction_contracts))),
+            'contracts_signed': int(round(transaction_contracts)),
+            'notional': pos_transaction_notional,
+            'price': price,
+            'current_notional': current_notional,
+            'current_contracts': int(current_quantity),
+            'current_direction': direction,
+            'new_notional': new_notional,
+            'new_contracts': int(round(new_contracts)),
+            'basket_id': basket_id,
+            'position_type': 'FUTURE',
+        })
+    
+    return trades
+
+
+def calculate_unwind_trades_cash(
+    positions_df: pd.DataFrame,
+    basket_id: str
+) -> list:
+    """
+    Calculate trades to fully unwind cash borrow/lend positions.
+    
+    Cash Borrow: negative notional (owe money) → unwind with positive (repay)
+    Cash Lend: positive notional (owed money) → unwind with negative (recall)
+    
+    Args:
+        positions_df: DataFrame with all positions
+        basket_id: Basket identifier
+    
+    Returns:
+        List of trade dictionaries
+    """
+    trades = []
+    
+    cash_mask = (positions_df['BASKET_ID'] == basket_id) & \
+                (positions_df['POSITION_TYPE'].isin(['CASH_BORROW', 'CASH_LEND']))
+    cash_positions = positions_df[cash_mask]
+    
+    for _, pos in cash_positions.iterrows():
+        pos_type = pos.get('POSITION_TYPE', '')
+        current_notional = pos.get('NOTIONAL_USD', 0) or 0
+        rate = pos.get('FINANCING_RATE_%', 0) or 0
+        counterparty = pos.get('EXCHANGE_OR_COUNTERPARTY', 'N/A')
+        
+        # Unwind = flip the sign
+        unwind_notional = -1 * current_notional
+        
+        # Determine action
+        if pos_type == 'CASH_BORROW':
+            action = 'REPAY' if unwind_notional > 0 else 'BORROW'
+        else:  # CASH_LEND
+            action = 'RECALL' if unwind_notional < 0 else 'LEND'
+        
+        trades.append({
+            'position_id': pos.get('POSITION_ID', ''),
+            'position_type': pos_type,
+            'ticker': 'Cash',
+            'action': action,
+            'notional': unwind_notional,
+            'current_notional': current_notional,
+            'new_notional': 0,
+            'rate': rate,
+            'counterparty': counterparty,
+            'basket_id': basket_id,
+        })
+    
+    return trades
+
+
+def calculate_resize_trades_cash(
+    positions_df: pd.DataFrame,
+    basket_id: str,
+    transaction_notional: float
+) -> list:
+    """
+    Calculate trades to resize cash borrow/lend positions.
+    
+    For Cash Borrow (negative position):
+        - Positive transaction = repay some/borrow less
+        - Negative transaction = borrow more
+    
+    For Cash Lend (positive position):
+        - Positive transaction = lend more
+        - Negative transaction = recall some
+    
+    Args:
+        positions_df: DataFrame with all positions
+        basket_id: Basket identifier
+        transaction_notional: The notional change to apply (signed)
+    
+    Returns:
+        List of trade dictionaries
+    """
+    trades = []
+    
+    cash_mask = (positions_df['BASKET_ID'] == basket_id) & \
+                (positions_df['POSITION_TYPE'].isin(['CASH_BORROW', 'CASH_LEND']))
+    cash_positions = positions_df[cash_mask]
+    
+    for _, pos in cash_positions.iterrows():
+        pos_type = pos.get('POSITION_TYPE', '')
+        current_notional = pos.get('NOTIONAL_USD', 0) or 0
+        rate = pos.get('FINANCING_RATE_%', 0) or 0
+        counterparty = pos.get('EXCHANGE_OR_COUNTERPARTY', 'N/A')
+        
+        new_notional = current_notional + transaction_notional
+        
+        # Determine action
+        if pos_type == 'CASH_BORROW':
+            action = 'REPAY' if transaction_notional > 0 else 'BORROW'
+        else:  # CASH_LEND
+            action = 'LEND' if transaction_notional > 0 else 'RECALL'
+        
+        trades.append({
+            'position_id': pos.get('POSITION_ID', ''),
+            'position_type': pos_type,
+            'ticker': 'Cash',
+            'action': action,
+            'notional': transaction_notional,
+            'current_notional': current_notional,
+            'new_notional': new_notional,
+            'rate': rate,
+            'counterparty': counterparty,
+            'basket_id': basket_id,
+        })
+    
+    return trades
+
+
+def calculate_unwind_trades_stock_borrow(
+    positions_df: pd.DataFrame,
+    basket_id: str
+) -> list:
+    """
+    Calculate trades to fully unwind stock borrow positions.
+    
+    Stock Borrow: positive notional (borrowed shares) → unwind with negative (return)
+    
+    Args:
+        positions_df: DataFrame with all positions
+        basket_id: Basket identifier
+    
+    Returns:
+        List of trade dictionaries
+    """
+    trades = []
+    
+    borrow_mask = (positions_df['BASKET_ID'] == basket_id) & \
+                  (positions_df['POSITION_TYPE'] == 'STOCK_BORROW')
+    borrow_positions = positions_df[borrow_mask]
+    
+    # Get aggregate info
+    total_market_value = borrow_positions['MARKET_VALUE_USD'].sum() if not borrow_positions.empty else 0
+    position_count = len(borrow_positions)
+    
+    if borrow_positions.empty:
+        return trades
+    
+    # Get rate and counterparty from first position (typically same for all)
+    first_pos = borrow_positions.iloc[0]
+    rate = first_pos.get('FINANCING_RATE_%', 0) or 0
+    counterparty = first_pos.get('EXCHANGE_OR_COUNTERPARTY', 'N/A')
+    
+    # Return all borrowed shares (aggregate level)
+    unwind_notional = -1 * abs(total_market_value)
+    
+    trades.append({
+        'position_id': 'STOCK_BORROW_AGGREGATE',
+        'position_type': 'STOCK_BORROW',
+        'ticker': 'Stock Borrow (Aggregate)',
+        'action': 'RETURN',
+        'notional': unwind_notional,
+        'current_notional': total_market_value,
+        'new_notional': 0,
+        'position_count': position_count,
+        'rate': rate,
+        'counterparty': counterparty,
+        'basket_id': basket_id,
+    })
+    
+    return trades
+
+
+def calculate_resize_trades_stock_borrow(
+    positions_df: pd.DataFrame,
+    basket_id: str,
+    transaction_notional: float
+) -> list:
+    """
+    Calculate trades to resize stock borrow positions.
+    
+    Positive transaction = borrow more shares
+    Negative transaction = return some shares
+    
+    Args:
+        positions_df: DataFrame with all positions
+        basket_id: Basket identifier
+        transaction_notional: The notional change to apply (signed)
+    
+    Returns:
+        List of trade dictionaries
+    """
+    trades = []
+    
+    borrow_mask = (positions_df['BASKET_ID'] == basket_id) & \
+                  (positions_df['POSITION_TYPE'] == 'STOCK_BORROW')
+    borrow_positions = positions_df[borrow_mask]
+    
+    if borrow_positions.empty:
+        return trades
+    
+    total_market_value = borrow_positions['MARKET_VALUE_USD'].sum()
+    position_count = len(borrow_positions)
+    
+    first_pos = borrow_positions.iloc[0]
+    rate = first_pos.get('FINANCING_RATE_%', 0) or 0
+    counterparty = first_pos.get('EXCHANGE_OR_COUNTERPARTY', 'N/A')
+    
+    new_notional = total_market_value + transaction_notional
+    
+    action = 'BORROW' if transaction_notional > 0 else 'RETURN'
+    
+    trades.append({
+        'position_id': 'STOCK_BORROW_AGGREGATE',
+        'position_type': 'STOCK_BORROW',
+        'ticker': 'Stock Borrow (Aggregate)',
+        'action': action,
+        'notional': transaction_notional,
+        'current_notional': total_market_value,
+        'new_notional': new_notional,
+        'position_count': position_count,
+        'rate': rate,
+        'counterparty': counterparty,
+        'basket_id': basket_id,
+    })
+    
+    return trades
+
+
+def calculate_equity_trades_for_notional(
+    positions_df: pd.DataFrame,
+    market_data_df: pd.DataFrame,
+    basket_id: str,
+    transaction_notional: float
+) -> pd.DataFrame:
+    """
+    Calculate per-stock trades to achieve a given notional change in equity basket.
+    
+    Uses index weights from market data to proportionally allocate the notional
+    across all S&P 500 constituents.
+    
+    Transaction notional:
+        - Positive = buying shares (going more long / reducing short)
+        - Negative = selling shares (going more short / reducing long)
+    
+    Args:
+        positions_df: DataFrame with all positions
+        market_data_df: DataFrame with index weights (stockmarketdata.csv)
+        basket_id: Basket identifier
+        transaction_notional: Total notional change to apply (signed)
+    
+    Returns:
+        DataFrame with columns:
+            TICKER, COMPANY, CURRENT_SHARES, CURRENT_MARKET_VALUE,
+            TRANSACTION_VALUE, SHARES_TRANSACTED, SHARES_AFTER, MARKET_VALUE_AFTER
+    """
+    results = []
+    
+    # Get current equity positions
+    equity_mask = (positions_df['BASKET_ID'] == basket_id) & \
+                  (positions_df['POSITION_TYPE'] == 'EQUITY')
+    equity_positions = positions_df[equity_mask]
+    
+    # Build lookup for current positions
+    current_positions = {}
+    for _, pos in equity_positions.iterrows():
+        ticker = pos.get('UNDERLYING', '')
+        current_positions[ticker] = {
+            'shares': pos.get('QUANTITY', 0) or 0,
+            'market_value': pos.get('MARKET_VALUE_USD', 0) or 0,
+            'price': pos.get('PRICE_OR_LEVEL', 0) or 0,
+        }
+    
+    # Build lookup for market data
+    market_lookup = {}
+    if not market_data_df.empty and 'BLOOMBERG_TICKER' in market_data_df.columns:
+        for _, row in market_data_df.iterrows():
+            ticker = row.get('BLOOMBERG_TICKER', '')
+            if pd.notna(ticker):
+                market_lookup[ticker] = {
+                    'company': row.get('COMPANY', ''),
+                    'price': row.get('LOCAL_PRICE', 0) or 0,
+                    'index_weight': row.get('INDEX_WEIGHT', 0) or 0,
+                }
+    
+    # Calculate trades for each stock in index
+    for ticker, mkt_data in market_lookup.items():
+        index_weight = mkt_data['index_weight']
+        price = mkt_data['price']
+        company = mkt_data['company']
+        
+        if index_weight <= 0 or price <= 0:
+            continue
+        
+        # Get current position (may not exist)
+        current = current_positions.get(ticker, {'shares': 0, 'market_value': 0, 'price': price})
+        current_shares = current['shares']
+        current_market_value = current['market_value']
+        
+        # Calculate transaction for this stock
+        transaction_value = transaction_notional * index_weight
+        shares_transacted = transaction_value / price
+        
+        # Calculate post-transaction state
+        shares_after = current_shares + shares_transacted
+        market_value_after = shares_after * price
+        
+        # Determine action
+        if shares_transacted > 0:
+            action = 'BUY'
+        elif shares_transacted < 0:
+            action = 'SELL'
+        else:
+            action = 'NONE'
+        
+        results.append({
+            'TICKER': ticker,
+            'COMPANY': company,
+            'CURRENT_SHARES': current_shares,
+            'CURRENT_MARKET_VALUE': current_market_value,
+            'PRICE': price,
+            'INDEX_WEIGHT': index_weight,
+            'TRANSACTION_VALUE': transaction_value,
+            'SHARES_TRANSACTED': shares_transacted,
+            'SHARES_AFTER': shares_after,
+            'MARKET_VALUE_AFTER': market_value_after,
+            'ACTION': action,
+        })
+    
+    return pd.DataFrame(results)
+
+
+def calculate_unwind_trades_equities(
+    positions_df: pd.DataFrame,
+    market_data_df: pd.DataFrame,
+    basket_id: str
+) -> pd.DataFrame:
+    """
+    Calculate trades to fully unwind all equity positions in a basket.
+    
+    For each position, the unwind trade is the opposite of current holdings:
+        - Long 100 shares → Sell 100 shares
+        - Short 100 shares → Buy 100 shares
+    
+    Args:
+        positions_df: DataFrame with all positions
+        market_data_df: DataFrame with market data (for company names)
+        basket_id: Basket identifier
+    
+    Returns:
+        DataFrame with trade details per stock
+    """
+    results = []
+    
+    # Get current equity positions
+    equity_mask = (positions_df['BASKET_ID'] == basket_id) & \
+                  (positions_df['POSITION_TYPE'] == 'EQUITY')
+    equity_positions = positions_df[equity_mask]
+    
+    # Company name lookup
+    company_lookup = {}
+    if not market_data_df.empty and 'BLOOMBERG_TICKER' in market_data_df.columns:
+        for _, row in market_data_df.iterrows():
+            ticker = row.get('BLOOMBERG_TICKER', '')
+            if pd.notna(ticker):
+                company_lookup[ticker] = row.get('COMPANY', '')
+    
+    for _, pos in equity_positions.iterrows():
+        ticker = pos.get('UNDERLYING', '')
+        current_shares = pos.get('QUANTITY', 0) or 0
+        current_market_value = pos.get('MARKET_VALUE_USD', 0) or 0
+        price = pos.get('PRICE_OR_LEVEL', 0) or 0
+        
+        # Unwind = flip the sign
+        shares_transacted = -1 * current_shares
+        transaction_value = shares_transacted * price if price > 0 else -1 * current_market_value
+        
+        # Determine action
+        if shares_transacted > 0:
+            action = 'BUY'
+        elif shares_transacted < 0:
+            action = 'SELL'
+        else:
+            action = 'NONE'
+        
+        results.append({
+            'TICKER': ticker,
+            'COMPANY': company_lookup.get(ticker, ''),
+            'CURRENT_SHARES': current_shares,
+            'CURRENT_MARKET_VALUE': current_market_value,
+            'PRICE': price,
+            'INDEX_WEIGHT': 0,  # Not used for unwind
+            'TRANSACTION_VALUE': transaction_value,
+            'SHARES_TRANSACTED': shares_transacted,
+            'SHARES_AFTER': 0,
+            'MARKET_VALUE_AFTER': 0,
+            'ACTION': action,
+        })
+    
+    return pd.DataFrame(results)
+
+
+def calculate_basket_component_totals(
+    positions_df: pd.DataFrame,
+    basket_id: str
+) -> dict:
+    """
+    Calculate current total notional/market value for each component type in a basket.
+    
+    Args:
+        positions_df: DataFrame with all positions
+        basket_id: Basket identifier
+    
+    Returns:
+        Dictionary with totals for each component type
+    """
+    basket_mask = positions_df['BASKET_ID'] == basket_id
+    basket_positions = positions_df[basket_mask]
+    
+    totals = {
+        'futures_notional': 0.0,
+        'futures_contracts': 0,
+        'cash_borrow_notional': 0.0,
+        'cash_lend_notional': 0.0,
+        'stock_borrow_notional': 0.0,
+        'equity_market_value': 0.0,
+        'equity_position_count': 0,
+        'has_futures': False,
+        'has_cash_borrow': False,
+        'has_cash_lend': False,
+        'has_stock_borrow': False,
+        'has_equities': False,
+    }
+    
+    for _, pos in basket_positions.iterrows():
+        pos_type = pos.get('POSITION_TYPE', '')
+        notional = pos.get('NOTIONAL_USD', 0) or 0
+        market_value = pos.get('MARKET_VALUE_USD', 0) or 0
+        quantity = pos.get('QUANTITY', 0) or 0
+        
+        if pos_type == 'FUTURE':
+            totals['futures_notional'] += notional
+            totals['futures_contracts'] += int(quantity) if pd.notna(quantity) else 0
+            totals['has_futures'] = True
+        elif pos_type == 'CASH_BORROW':
+            totals['cash_borrow_notional'] += notional
+            totals['has_cash_borrow'] = True
+        elif pos_type == 'CASH_LEND':
+            totals['cash_lend_notional'] += notional
+            totals['has_cash_lend'] = True
+        elif pos_type == 'STOCK_BORROW':
+            totals['stock_borrow_notional'] += market_value
+            totals['has_stock_borrow'] = True
+        elif pos_type == 'EQUITY':
+            totals['equity_market_value'] += market_value
+            totals['equity_position_count'] += 1
+            totals['has_equities'] = True
+    
+    return totals
+
+
+def calculate_basket_unwind_all(
+    positions_df: pd.DataFrame,
+    market_data_df: pd.DataFrame,
+    basket_id: str
+) -> dict:
+    """
+    Calculate all trades needed to fully unwind a basket.
+    
+    Returns separate trade lists for each component type.
+    
+    Args:
+        positions_df: DataFrame with all positions
+        market_data_df: DataFrame with market data
+        basket_id: Basket identifier
+    
+    Returns:
+        Dictionary with trade lists:
+            - futures_trades: list
+            - cash_trades: list
+            - stock_borrow_trades: list
+            - equity_trades: DataFrame
+    """
+    return {
+        'futures_trades': calculate_unwind_trades_futures(positions_df, basket_id),
+        'cash_trades': calculate_unwind_trades_cash(positions_df, basket_id),
+        'stock_borrow_trades': calculate_unwind_trades_stock_borrow(positions_df, basket_id),
+        'equity_trades': calculate_unwind_trades_equities(positions_df, market_data_df, basket_id),
+        'basket_id': basket_id,
+        'mode': 'unwind',
+    }
+
+
+def calculate_basket_resize_all(
+    positions_df: pd.DataFrame,
+    market_data_df: pd.DataFrame,
+    basket_id: str,
+    transaction_notional: float
+) -> dict:
+    """
+    Calculate all trades needed to resize a basket by a given notional.
+    
+    All components are resized by the same notional amount to maintain
+    the hedge relationship.
+    
+    Args:
+        positions_df: DataFrame with all positions
+        market_data_df: DataFrame with market data
+        basket_id: Basket identifier
+        transaction_notional: The notional change to apply (signed)
+    
+    Returns:
+        Dictionary with trade lists for each component type
+    """
+    return {
+        'futures_trades': calculate_resize_trades_futures(positions_df, basket_id, transaction_notional),
+        'cash_trades': calculate_resize_trades_cash(positions_df, basket_id, transaction_notional),
+        'stock_borrow_trades': calculate_resize_trades_stock_borrow(positions_df, basket_id, transaction_notional),
+        'equity_trades': calculate_equity_trades_for_notional(
+            positions_df, market_data_df, basket_id, transaction_notional
+        ),
+        'basket_id': basket_id,
+        'mode': 'resize',
+        'transaction_notional': transaction_notional,
+    }
+
+
+def calculate_equivalent_futures_contracts(
+    notional: float,
+    positions_df: pd.DataFrame,
+    basket_id: str
+) -> float:
+    """
+    Calculate how many futures contracts are equivalent to a given notional.
+    
+    Uses the current futures price from the basket's futures positions.
+    This is a reference calculation for display purposes.
+    
+    Args:
+        notional: Notional amount in USD
+        positions_df: DataFrame with all positions
+        basket_id: Basket identifier
+    
+    Returns:
+        Number of equivalent futures contracts
+    """
+    # Get futures price from basket
+    futures_mask = (positions_df['BASKET_ID'] == basket_id) & \
+                   (positions_df['POSITION_TYPE'] == 'FUTURE')
+    futures_positions = positions_df[futures_mask]
+    
+    if futures_positions.empty:
+        # Use a default SPX price if no futures in basket
+        default_price = 5300
+        return calculate_futures_contracts_from_notional(notional, default_price)
+    
+    # Use average price if multiple futures
+    avg_price = futures_positions['PRICE_OR_LEVEL'].mean()
+    
+    return calculate_futures_contracts_from_notional(notional, avg_price)
+
+
 def calculate_basket_calendar_trade_recommendations(
     basket_id: str,
     positions_df: pd.DataFrame,

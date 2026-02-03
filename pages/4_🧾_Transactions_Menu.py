@@ -68,6 +68,30 @@ with tab_blotter:
     st.markdown("### Trade Blotter")
 
     blotter = st.session_state.get("trade_blotter", [])
+    
+    # Clear All Transactions button
+    if blotter:
+        col_clear, col_spacer = st.columns([2, 6])
+        with col_clear:
+            if st.session_state.get("confirm_clear_all", False):
+                st.warning("Are you sure you want to delete ALL transactions?")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Yes, Clear All", type="primary", use_container_width=True):
+                        st.session_state["trade_blotter"] = []
+                        st.session_state["confirm_clear_all"] = False
+                        st.balloons()
+                        st.rerun()
+                with c2:
+                    if st.button("Cancel", use_container_width=True):
+                        st.session_state["confirm_clear_all"] = False
+                        st.rerun()
+            else:
+                if st.button("🗑️ Clear All Transactions", use_container_width=True):
+                    st.session_state["confirm_clear_all"] = True
+                    st.rerun()
+        st.markdown("---")
+    
     if not blotter:
         st.info("No trades yet. Submit or schedule a trade from the Transaction page to see it here.")
     else:
