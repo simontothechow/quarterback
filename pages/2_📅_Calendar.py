@@ -42,6 +42,7 @@ apply_theme()
 positions_df = get_cached_data('positions')
 corp_actions = get_cached_data('corp_actions')
 market_data = get_cached_data('market_data')
+earnings_df = get_cached_data('earnings')
 
 # Get basket list
 baskets = get_basket_list(positions_df)
@@ -218,6 +219,67 @@ def get_corporate_action_events(corp_actions_df: pd.DataFrame) -> list:
     return events
 
 
+def get_earnings_events_for_calendar(
+    earnings_df: pd.DataFrame,
+    market_data_df: pd.DataFrame,
+    allowed_bloomberg_tickers: list[str] | None = None,
+) -> list:
+    """Get earnings events formatted for calendar display."""
+    events = []
+    if earnings_df is None or earnings_df.empty:
+        return events
+
+    df = earnings_df.copy()
+    if "EARNINGS_DATE" not in df.columns:
+        return events
+
+    df["EARNINGS_DATE"] = pd.to_datetime(df["EARNINGS_DATE"], errors="coerce")
+    df = df[df["EARNINGS_DATE"].notna()]
+
+    if allowed_bloomberg_tickers is not None:
+        allowed = set([str(t).strip() for t in allowed_bloomberg_tickers if t])
+        if allowed:
+            if "BLOOMBERG_TICKER" in df.columns:
+                df = df[df["BLOOMBERG_TICKER"].astype(str).isin(allowed)]
+
+    # Company lookup (prefer market data, fallback to excel Company Name)
+    company_lookup = {}
+    if market_data_df is not None and not market_data_df.empty:
+        if "BLOOMBERG_TICKER" in market_data_df.columns and "COMPANY" in market_data_df.columns:
+            for _, r in market_data_df[["BLOOMBERG_TICKER", "COMPANY"]].dropna().iterrows():
+                company_lookup[str(r["BLOOMBERG_TICKER"])] = str(r["COMPANY"])
+
+    for _, row in df.iterrows():
+        bloomberg_ticker = str(row.get("BLOOMBERG_TICKER", "")).strip()
+        short_ticker = str(row.get("TICKER", bloomberg_ticker)).strip()
+        company = company_lookup.get(bloomberg_ticker) or str(row.get("COMPANY_NAME", "")).strip()
+        eff_date = row["EARNINGS_DATE"]
+
+        if not bloomberg_ticker or pd.isna(eff_date):
+            continue
+
+        desc = f"{short_ticker} - Earnings"
+        if company:
+            desc = f"{short_ticker} - Earnings ({company})"
+
+        events.append(
+            {
+                "date": eff_date,
+                "type": "Earnings",
+                "subtype": "Earnings",
+                "description": desc,
+                "ticker": bloomberg_ticker,
+                "display_ticker": short_ticker,
+                "company": company,
+                "category": "earnings",
+                "counterparty": "",
+                "basket": "",
+            }
+        )
+
+    return events
+
+
 def get_event_color(category: str, event_type: str = None) -> str:
     """Get color for event category."""
     if category == 'dividend':
@@ -226,6 +288,8 @@ def get_event_color(category: str, event_type: str = None) -> str:
         return COLORS['accent_orange']
     elif category == 'corporate_action':
         return COLORS['accent_blue']
+    elif category == 'earnings':
+        return "#a855f7"  # purple
     return COLORS['text_secondary']
 
 
@@ -237,6 +301,8 @@ def get_event_icon(category: str) -> str:
         return "⏰"
     elif category == 'corporate_action':
         return "📋"
+    elif category == 'earnings':
+        return "📣"
     return "📌"
 
 
@@ -629,6 +695,8 @@ def render_visual_calendar(events: list, year: int, month: int):
                                     events_html += f'<div style="background-color: {color}22; border-left: 2px solid {color}; padding: 2px 4px; margin: 2px 0; font-size: 0.6rem; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{ticker}</div>'
                             else:
                                 cat_name = 'Div' if cat == 'dividend' else ('Life' if cat == 'lifecycle' else 'Corp')
+                                if cat == 'earnings':
+                                    cat_name = 'Earn'
                                 events_html += f'<div style="background-color: {color}22; border-left: 2px solid {color}; padding: 2px 4px; margin: 2px 0; font-size: 0.6rem; color: #fff;">{count} {cat_name}</div>'
                     
                     # Show the day cell with HTML
@@ -762,6 +830,7 @@ with st.sidebar:
     show_dividends = st.checkbox("Dividends", value=True)
     show_lifecycle = st.checkbox("Trade Lifecycle", value=True)
     show_corp_actions = st.checkbox("Corporate Actions", value=True)
+    show_earnings = st.checkbox("Earnings", value=True)
     
     st.markdown("---")
     
@@ -817,6 +886,21 @@ if show_corp_actions:
     corp_events = get_corporate_action_events(corp_actions)
     all_events.extend(corp_events)
 
+# Get earnings events (Top 50) for tickers held in selected baskets
+if show_earnings:
+    held_tickers = (
+        positions_df[
+            (positions_df["BASKET_ID"].isin(selected_baskets))
+            & (positions_df["POSITION_TYPE"] == "EQUITY")
+        ]["UNDERLYING"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+    earn_events = get_earnings_events_for_calendar(earnings_df, market_data, allowed_bloomberg_tickers=held_tickers)
+    all_events.extend(earn_events)
+
 # Summary stats
 if all_events:
     events_in_range = [e for e in all_events 
@@ -835,8 +919,14 @@ if all_events:
     with col3:
         corp_count = len([e for e in events_in_range if e.get('category') == 'corporate_action'])
         st.metric("Corporate Actions", corp_count)
-    
+
     with col4:
+        earnings_count = len([e for e in events_in_range if e.get('category') == 'earnings'])
+        st.metric("Earnings", earnings_count)
+
+    # Second row for total (keeps layout tidy)
+    col1b, col2b, col3b, col4b = st.columns(4)
+    with col1b:
         st.metric("Total Events", len(events_in_range))
 
 st.markdown("---")

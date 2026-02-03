@@ -191,6 +191,52 @@ def load_corporate_actions(file_path: Optional[str] = None) -> pd.DataFrame:
     return df
 
 
+def load_top50_earnings(file_path: Optional[str] = None) -> pd.DataFrame:
+    """
+    Load and process Top 50 S&P 500 earnings dates (demo dataset).
+    
+    Expected columns (as provided in the demo Excel):
+        - Ticker
+        - Company Name
+        - Earnings Announcement Date
+        - BLOOMBERG_TICKER
+    
+    Normalized output columns:
+        - TICKER
+        - COMPANY_NAME
+        - EARNINGS_DATE
+        - BLOOMBERG_TICKER
+    """
+    if file_path is None:
+        # Stored in project root (demo asset)
+        file_path = DATA_PATH.parent / "top50_earnings_dates.xlsx"
+
+    df = pd.read_excel(file_path)
+
+    # Normalize column names
+    rename_map = {
+        "Ticker": "TICKER",
+        "Company Name": "COMPANY_NAME",
+        "Earnings Announcement Date": "EARNINGS_DATE",
+        "BLOOMBERG_TICKER": "BLOOMBERG_TICKER",
+    }
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+
+    # Coerce required columns
+    for col in ["TICKER", "COMPANY_NAME", "BLOOMBERG_TICKER"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
+
+    if "EARNINGS_DATE" in df.columns:
+        df["EARNINGS_DATE"] = pd.to_datetime(df["EARNINGS_DATE"], errors="coerce")
+
+    # Drop rows without a date or ticker
+    if "EARNINGS_DATE" in df.columns and "BLOOMBERG_TICKER" in df.columns:
+        df = df[df["EARNINGS_DATE"].notna() & df["BLOOMBERG_TICKER"].notna()]
+
+    return df
+
+
 def get_basket_list(positions_df: pd.DataFrame) -> list:
     """
     Extract unique basket IDs from positions data.
@@ -319,6 +365,8 @@ def get_cached_data(data_type: str, force_reload: bool = False) -> pd.DataFrame:
             _cache[data_type] = load_stock_market_data()
         elif data_type == 'corp_actions':
             _cache[data_type] = load_corporate_actions()
+        elif data_type == 'earnings':
+            _cache[data_type] = load_top50_earnings()
         else:
             raise ValueError(f"Unknown data type: {data_type}")
     
