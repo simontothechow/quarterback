@@ -1,0 +1,26 @@
+DATE,EVENT_TYPE,EVENT_NAME,DESCRIPTION,MARKET_CLOSED
+2025-11-27,HOLIDAY,Thanksgiving Day,US markets closed for Thanksgiving,TRUE
+2025-11-28,EARLY_CLOSE,Day After Thanksgiving,US markets close early at 1:00 PM ET,FALSE
+2025-12-10,FOMC,FOMC Rate Decision,Federal Reserve interest rate announcement,FALSE
+2025-12-24,EARLY_CLOSE,Christmas Eve,US markets close early at 1:00 PM ET,FALSE
+2025-12-25,HOLIDAY,Christmas Day,US markets closed for Christmas,TRUE
+2026-01-01,HOLIDAY,New Year's Day,US markets closed for New Year's Day,TRUE
+2026-01-28,FOMC,FOMC Rate Decision,Federal Reserve interest rate announcement,FALSE
+2026-01-19,HOLIDAY,Martin Luther King Jr. Day,US markets closed for MLK Day,TRUE
+2026-02-16,HOLIDAY,Washington's Birthday,US markets closed for Presidents Day,TRUE
+2026-03-18,FOMC,FOMC Rate Decision + SEP,Federal Reserve rate decision with Summary of Economic Projections,FALSE
+2026-04-03,HOLIDAY,Good Friday,US markets closed for Good Friday,TRUE
+2026-04-29,FOMC,FOMC Rate Decision,Federal Reserve interest rate announcement,FALSE
+2026-05-25,HOLIDAY,Memorial Day,US markets closed for Memorial Day,TRUE
+2026-06-17,FOMC,FOMC Rate Decision + SEP,Federal Reserve rate decision with Summary of Economic Projections,FALSE
+2026-06-19,HOLIDAY,Juneteenth,US markets closed for Juneteenth National Independence Day,TRUE
+2026-07-03,HOLIDAY,Independence Day (Observed),US markets closed for July 4th (observed),TRUE
+2026-07-29,FOMC,FOMC Rate Decision,Federal Reserve interest rate announcement,FALSE
+2026-09-07,HOLIDAY,Labor Day,US markets closed for Labor Day,TRUE
+2026-09-16,FOMC,FOMC Rate Decision + SEP,Federal Reserve rate decision with Summary of Economic Projections,FALSE
+2026-10-28,FOMC,FOMC Rate Decision,Federal Reserve interest rate announcement,FALSE
+2026-11-26,HOLIDAY,Thanksgiving Day,US markets closed for Thanksgiving,TRUE
+2026-11-27,EARLY_CLOSE,Day After Thanksgiving,US markets close early at 1:00 PM ET,FALSE
+2026-12-09,FOMC,FOMC Rate Decision + SEP,Federal Reserve rate decision with Summary of Economic Projections,FALSE
+2026-12-24,EARLY_CLOSE,Christmas Eve,US markets close early at 1:00 PM ET,FALSE
+2026-12-25,HOLIDAY,Christmas Day,US markets closed for Christmas,TRUE

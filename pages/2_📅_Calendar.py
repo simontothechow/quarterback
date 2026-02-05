@@ -43,6 +43,7 @@ positions_df = get_cached_data('positions')
 corp_actions = get_cached_data('corp_actions')
 market_data = get_cached_data('market_data')
 earnings_df = get_cached_data('earnings')
+market_events_df = get_cached_data('market_events')
 
 # Get basket list
 baskets = get_basket_list(positions_df)
@@ -58,25 +59,31 @@ def get_basket_events(basket_id: str, positions_df: pd.DataFrame) -> list:
         instrument = pos.get('INSTRUMENT_NAME', pos_type)
         underlying = pos.get('UNDERLYING', '')
         counterparty = pos.get('EXCHANGE_OR_COUNTERPARTY', '')
+        pnl = pos.get('PNL_USD', 0)
+        if pd.isna(pnl):
+            pnl = 0
         
         # End date / maturity events
         end_date = pos.get('END_DATE')
         if pd.notna(end_date):
+            # Format end date for display
+            end_date_str = pd.Timestamp(end_date).strftime('%b %d, %Y')
+            
             # Create more descriptive event based on position type
             if pos_type == 'STOCK_BORROW':
-                description = f"{underlying} Stock Loan Maturity"
+                description = f"{underlying} Stock Loan Maturity - {end_date_str}"
                 event_subtype = 'Stock Loan Maturity'
             elif pos_type == 'FUTURE':
-                description = f"{instrument} - Futures Maturity"
+                description = f"{instrument} {end_date_str}"
                 event_subtype = 'Futures Maturity'
             elif pos_type == 'CASH_BORROW':
-                description = f"Cash Borrow Maturity - {counterparty}"
+                description = f"Cash Borrow Maturity - {counterparty} - {end_date_str}"
                 event_subtype = 'Cash Maturity'
             elif pos_type == 'CASH_LEND':
-                description = f"Cash Lend Maturity - {counterparty}"
+                description = f"Cash Lend Maturity - {counterparty} - {end_date_str}"
                 event_subtype = 'Cash Maturity'
             else:
-                description = f"{instrument} - Maturity"
+                description = f"{instrument} - Maturity - {end_date_str}"
                 event_subtype = 'Other Maturity'
             
             events.append({
@@ -88,22 +95,27 @@ def get_basket_events(basket_id: str, positions_df: pd.DataFrame) -> list:
                 'category': 'lifecycle',
                 'ticker': underlying if underlying else instrument,
                 'counterparty': counterparty,
-                'position_type': pos_type
+                'position_type': pos_type,
+                'pnl': pnl,
+                'instrument': instrument
             })
             
             # Roll event if flagged
             if pos.get('ROLL_EVENT_FLAG') == 'TRUE' or pos.get('ROLL_EVENT_FLAG') == True:
                 roll_date = end_date - timedelta(days=5)
+                roll_date_str = pd.Timestamp(roll_date).strftime('%b %d, %Y')
                 events.append({
                     'date': roll_date,
                     'type': 'Roll',
                     'subtype': 'Roll Window',
-                    'description': f"{instrument} - Roll Window Opens",
+                    'description': f"{instrument} - Roll Window Opens ({roll_date_str})",
                     'basket': basket_id,
                     'category': 'lifecycle',
                     'ticker': underlying if underlying else instrument,
                     'counterparty': counterparty,
-                    'position_type': pos_type
+                    'position_type': pos_type,
+                    'pnl': pnl,
+                    'instrument': instrument
                 })
     
     return events
@@ -280,6 +292,57 @@ def get_earnings_events_for_calendar(
     return events
 
 
+def get_market_events_for_calendar(market_events_df: pd.DataFrame) -> list:
+    """Get market events (FOMC, holidays, early closes) formatted for calendar display."""
+    events = []
+    
+    if market_events_df is None or market_events_df.empty:
+        return events
+    
+    for _, row in market_events_df.iterrows():
+        event_date = row.get('DATE')
+        if pd.isna(event_date):
+            continue
+        
+        event_type = str(row.get('EVENT_TYPE', '')).upper()
+        event_name = str(row.get('EVENT_NAME', ''))
+        description = str(row.get('DESCRIPTION', ''))
+        market_closed = row.get('MARKET_CLOSED', False)
+        
+        # Determine subtype and category based on event type
+        if event_type == 'FOMC':
+            category = 'fomc'
+            subtype = 'FOMC Announcement'
+            icon_hint = '🏛️'
+        elif event_type == 'HOLIDAY':
+            category = 'holiday'
+            subtype = 'Market Holiday'
+            icon_hint = '🚫'
+        elif event_type == 'EARLY_CLOSE':
+            category = 'early_close'
+            subtype = 'Early Close'
+            icon_hint = '⏰'
+        else:
+            category = 'market_event'
+            subtype = event_type
+            icon_hint = '📅'
+        
+        events.append({
+            'date': event_date,
+            'type': event_type,
+            'subtype': subtype,
+            'description': f"{event_name} - {description}" if description else event_name,
+            'ticker': '',
+            'display_ticker': event_name,
+            'category': category,
+            'counterparty': '',
+            'basket': '',
+            'market_closed': market_closed,
+        })
+    
+    return events
+
+
 def get_event_color(category: str, event_type: str = None) -> str:
     """Get color for event category."""
     if category == 'dividend':
@@ -290,6 +353,12 @@ def get_event_color(category: str, event_type: str = None) -> str:
         return COLORS['accent_blue']
     elif category == 'earnings':
         return "#a855f7"  # purple
+    elif category == 'fomc':
+        return "#ef4444"  # red
+    elif category == 'holiday':
+        return "#6b7280"  # gray
+    elif category == 'early_close':
+        return "#f59e0b"  # amber
     return COLORS['text_secondary']
 
 
@@ -303,6 +372,12 @@ def get_event_icon(category: str) -> str:
         return "📋"
     elif category == 'earnings':
         return "📣"
+    elif category == 'fomc':
+        return "🏛️"
+    elif category == 'holiday':
+        return "🚫"
+    elif category == 'early_close':
+        return "🕐"
     return "📌"
 
 
@@ -397,19 +472,36 @@ def render_event_detail_popup(selected_date, events: list):
             col1, col2 = st.columns(2)
             
             with col1:
-                # Impacted Tickers
-                st.markdown(f"""
-                    <div style="background-color: #1e1e1e; border: 1px solid #333; border-radius: 4px; 
-                                padding: 0.75rem; margin-bottom: 0.5rem;">
-                        <div style="color: #808080; font-size: 0.8rem; margin-bottom: 0.5rem;">
-                            IMPACTED TICKERS
+                # For earnings, market events, and lifecycle events, show description instead of tickers
+                if category in ['earnings', 'fomc', 'holiday', 'early_close', 'lifecycle']:
+                    # Get descriptions from events
+                    descriptions = [e.get('description', '') for e in subtype_events if e.get('description')]
+                    st.markdown(f"""
+                        <div style="background-color: #1e1e1e; border: 1px solid #333; border-radius: 4px; 
+                                    padding: 0.75rem; margin-bottom: 0.5rem;">
+                            <div style="color: #808080; font-size: 0.8rem; margin-bottom: 0.5rem;">
+                                DESCRIPTION
+                            </div>
+                            <div style="color: #fff; font-size: 0.9rem;">
+                                {'<br>'.join(descriptions[:5]) if descriptions else 'N/A'}
+                                {'<br>... and ' + str(len(descriptions) - 5) + ' more' if len(descriptions) > 5 else ''}
+                            </div>
                         </div>
-                        <div style="color: #fff; font-size: 0.9rem;">
-                            {', '.join(tickers[:10]) if tickers else 'N/A'}
-                            {'... and ' + str(len(tickers) - 10) + ' more' if len(tickers) > 10 else ''}
+                    """, unsafe_allow_html=True)
+                else:
+                    # Impacted Tickers for other event types (dividends, corporate actions)
+                    st.markdown(f"""
+                        <div style="background-color: #1e1e1e; border: 1px solid #333; border-radius: 4px; 
+                                    padding: 0.75rem; margin-bottom: 0.5rem;">
+                            <div style="color: #808080; font-size: 0.8rem; margin-bottom: 0.5rem;">
+                                IMPACTED TICKERS
+                            </div>
+                            <div style="color: #fff; font-size: 0.9rem;">
+                                {', '.join(tickers[:10]) if tickers else 'N/A'}
+                                {'... and ' + str(len(tickers) - 10) + ' more' if len(tickers) > 10 else ''}
+                            </div>
                         </div>
-                    </div>
-                """, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
                 
                 # Counterparty if applicable
                 if counterparties and counterparties[0]:
@@ -439,7 +531,17 @@ def render_event_detail_popup(selected_date, events: list):
                 if baskets_affected:
                     for basket in baskets_affected:
                         if basket:
-                            if st.button(f"📊 Go to {basket}", key=f"nav_{subtype}_{basket}_{selected_date}", use_container_width=True):
+                            # For lifecycle events, show PNL alongside basket name
+                            if category == 'lifecycle':
+                                # Get PNL for this basket from the events
+                                basket_pnl = sum([e.get('pnl', 0) for e in subtype_events if e.get('basket') == basket])
+                                pnl_color = '#00d26a' if basket_pnl >= 0 else '#ff4444'
+                                pnl_str = f"${basket_pnl:,.0f}" if basket_pnl >= 0 else f"-${abs(basket_pnl):,.0f}"
+                                btn_label = f"📊 {basket} - Current PNL {pnl_str}"
+                            else:
+                                btn_label = f"📊 Go to {basket}"
+                            
+                            if st.button(btn_label, key=f"nav_{subtype}_{basket}_{selected_date}", use_container_width=True):
                                 st.session_state['selected_basket'] = basket
                                 st.switch_page("pages/1_📊_Basket_Detail.py")
                 else:
@@ -691,12 +793,24 @@ def render_visual_calendar(events: list, year: int, month: int):
                             count = len(cat_events)
                             if count <= 2:
                                 for e in cat_events:
-                                    ticker = str(e.get('ticker', ''))[:8]
-                                    events_html += f'<div style="background-color: {color}22; border-left: 2px solid {color}; padding: 2px 4px; margin: 2px 0; font-size: 0.6rem; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{ticker}</div>'
+                                    # For market events, use display_ticker (event name) instead of ticker
+                                    if cat in ['fomc', 'holiday', 'early_close']:
+                                        label = str(e.get('display_ticker', ''))[:10]
+                                    else:
+                                        label = str(e.get('ticker', ''))[:8]
+                                    events_html += f'<div style="background-color: {color}22; border-left: 2px solid {color}; padding: 2px 4px; margin: 2px 0; font-size: 0.6rem; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{label}</div>'
                             else:
-                                cat_name = 'Div' if cat == 'dividend' else ('Life' if cat == 'lifecycle' else 'Corp')
-                                if cat == 'earnings':
-                                    cat_name = 'Earn'
+                                # Map category to short display name
+                                cat_name_map = {
+                                    'dividend': 'Div',
+                                    'lifecycle': 'Life',
+                                    'corporate_action': 'Corp',
+                                    'earnings': 'Earn',
+                                    'fomc': 'FOMC',
+                                    'holiday': 'Hol',
+                                    'early_close': 'Early',
+                                }
+                                cat_name = cat_name_map.get(cat, 'Event')
                                 events_html += f'<div style="background-color: {color}22; border-left: 2px solid {color}; padding: 2px 4px; margin: 2px 0; font-size: 0.6rem; color: #fff;">{count} {cat_name}</div>'
                     
                     # Show the day cell with HTML
@@ -831,6 +945,7 @@ with st.sidebar:
     show_lifecycle = st.checkbox("Trade Lifecycle", value=True)
     show_corp_actions = st.checkbox("Corporate Actions", value=True)
     show_earnings = st.checkbox("Earnings", value=True)
+    show_market_events = st.checkbox("Market Events (FOMC/Holidays)", value=True)
     
     st.markdown("---")
     
@@ -901,12 +1016,17 @@ if show_earnings:
     earn_events = get_earnings_events_for_calendar(earnings_df, market_data, allowed_bloomberg_tickers=held_tickers)
     all_events.extend(earn_events)
 
+# Get market events (FOMC announcements, holidays, early closes)
+if show_market_events:
+    mkt_events = get_market_events_for_calendar(market_events_df)
+    all_events.extend(mkt_events)
+
 # Summary stats
 if all_events:
     events_in_range = [e for e in all_events 
                        if pd.Timestamp(start_date) <= pd.Timestamp(e['date']) <= pd.Timestamp(end_date)]
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         dividend_count = len([e for e in events_in_range if e.get('category') == 'dividend'])
@@ -923,9 +1043,13 @@ if all_events:
     with col4:
         earnings_count = len([e for e in events_in_range if e.get('category') == 'earnings'])
         st.metric("Earnings", earnings_count)
+    
+    with col5:
+        market_count = len([e for e in events_in_range if e.get('category') in ['fomc', 'holiday', 'early_close']])
+        st.metric("Market Events", market_count)
 
     # Second row for total (keeps layout tidy)
-    col1b, col2b, col3b, col4b = st.columns(4)
+    col1b, col2b, col3b, col4b, col5b = st.columns(5)
     with col1b:
         st.metric("Total Events", len(events_in_range))
 
@@ -1011,8 +1135,12 @@ st.markdown("---")
 st.markdown("""
     <div style="background-color: #1e1e1e; padding: 1rem; border-radius: 6px;">
         <span style="color: #808080; font-weight: 600;">Legend:</span>
-        <span style="margin-left: 1.5rem;">💵 <span style="color: #00d26a;">Dividend</span></span>
-        <span style="margin-left: 1.5rem;">⏰ <span style="color: #ff8c00;">Trade Lifecycle</span></span>
-        <span style="margin-left: 1.5rem;">📋 <span style="color: #0088ff;">Corporate Action</span></span>
+        <span style="margin-left: 1rem;">💵 <span style="color: #00d26a;">Dividend</span></span>
+        <span style="margin-left: 1rem;">⏰ <span style="color: #ff8c00;">Trade Lifecycle</span></span>
+        <span style="margin-left: 1rem;">📋 <span style="color: #0088ff;">Corporate Action</span></span>
+        <span style="margin-left: 1rem;">📣 <span style="color: #a855f7;">Earnings</span></span>
+        <span style="margin-left: 1rem;">🏛️ <span style="color: #ef4444;">FOMC</span></span>
+        <span style="margin-left: 1rem;">🚫 <span style="color: #6b7280;">Holiday</span></span>
+        <span style="margin-left: 1rem;">🕐 <span style="color: #f59e0b;">Early Close</span></span>
     </div>
 """, unsafe_allow_html=True)

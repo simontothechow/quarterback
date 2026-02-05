@@ -237,6 +237,44 @@ def load_top50_earnings(file_path: Optional[str] = None) -> pd.DataFrame:
     return df
 
 
+def load_market_events(file_path: Optional[str] = None) -> pd.DataFrame:
+    """
+    Load and process market events data (FOMC announcements, holidays, early closes).
+    
+    Expected columns:
+        - DATE: Event date (YYYY-MM-DD)
+        - EVENT_TYPE: FOMC, HOLIDAY, or EARLY_CLOSE
+        - EVENT_NAME: Name of the event
+        - DESCRIPTION: Detailed description
+        - MARKET_CLOSED: TRUE if markets fully closed, FALSE otherwise
+    
+    Returns:
+        DataFrame with processed market events data
+    """
+    if file_path is None:
+        file_path = DATA_PATH / "market_events.csv"
+    
+    if not Path(file_path).exists():
+        # Return empty DataFrame if file doesn't exist
+        return pd.DataFrame(columns=['DATE', 'EVENT_TYPE', 'EVENT_NAME', 'DESCRIPTION', 'MARKET_CLOSED'])
+    
+    df = pd.read_csv(file_path)
+    
+    # Parse date column
+    if 'DATE' in df.columns:
+        df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
+    
+    # Convert MARKET_CLOSED to boolean
+    if 'MARKET_CLOSED' in df.columns:
+        df['MARKET_CLOSED'] = df['MARKET_CLOSED'].astype(str).str.upper() == 'TRUE'
+    
+    # Sort by date
+    if 'DATE' in df.columns:
+        df = df.sort_values('DATE', na_position='last')
+    
+    return df
+
+
 def get_basket_list(positions_df: pd.DataFrame) -> list:
     """
     Extract unique basket IDs from positions data.
@@ -350,7 +388,7 @@ def get_cached_data(data_type: str, force_reload: bool = False) -> pd.DataFrame:
     Get cached data or load if not cached.
     
     Args:
-        data_type: One of 'positions', 'market_data', 'corp_actions'
+        data_type: One of 'positions', 'market_data', 'corp_actions', 'earnings', 'market_events'
         force_reload: Force reload from file even if cached
     
     Returns:
@@ -367,6 +405,8 @@ def get_cached_data(data_type: str, force_reload: bool = False) -> pd.DataFrame:
             _cache[data_type] = load_corporate_actions()
         elif data_type == 'earnings':
             _cache[data_type] = load_top50_earnings()
+        elif data_type == 'market_events':
+            _cache[data_type] = load_market_events()
         else:
             raise ValueError(f"Unknown data type: {data_type}")
     
