@@ -72,6 +72,17 @@ with st.sidebar:
         st.switch_page("pages/2_📅_Calendar.py")
     if st.button("🧾 Transactions", use_container_width=True):
         st.switch_page("pages/4_🧾_Transactions_Menu.py")
+    if st.button("📦 New Basket", use_container_width=True):
+        st.switch_page("pages/9_📦_New_Basket.py")
+    
+    st.markdown("---")
+    st.markdown("### Quick Trades")
+    if st.button("📊 Futures Trade", use_container_width=True):
+        st.switch_page("pages/10_📊_Quick_Futures.py")
+    if st.button("📈 Equity Package", use_container_width=True):
+        st.switch_page("pages/11_📈_Quick_Equity.py")
+    if st.button("💰 Cash Trade", use_container_width=True):
+        st.switch_page("pages/12_💰_Quick_Cash.py")
 
 # Main content
 if selected_basket:

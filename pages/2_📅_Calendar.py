@@ -924,6 +924,8 @@ with st.sidebar:
         st.switch_page("pages/1_📊_Basket_Detail.py")
     if st.button("🧾 Transactions", use_container_width=True):
         st.switch_page("pages/4_🧾_Transactions_Menu.py")
+    if st.button("📦 New Basket", use_container_width=True):
+        st.switch_page("pages/9_📦_New_Basket.py")
     
     st.markdown("---")
     st.markdown("### 🔍 Filters")

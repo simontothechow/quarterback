@@ -52,6 +52,9 @@ with st.sidebar:
 
     if st.button("🧾 Transactions", use_container_width=True, disabled=True):
         pass
+    
+    if st.button("📦 New Basket", use_container_width=True):
+        st.switch_page("pages/9_📦_New_Basket.py")
 
 
 st.markdown("""
