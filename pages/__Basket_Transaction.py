@@ -297,10 +297,14 @@ def render_basket_transaction_page(txn_data: dict):
         with tabs[tab_idx]:
             st.markdown("### Cash Borrow/Lend Positions")
             
+            # NOTE: Cash financing moves with equities (opposite to futures)
+            # If reducing futures short (+$50M), also reduce cash borrow (-$50M)
             if mode == 'unwind':
                 cash_trades = calculate_unwind_trades_cash(positions_df, basket_id)
             else:
-                cash_trades = calculate_resize_trades_cash(positions_df, basket_id, transaction_notional)
+                # Flip sign - cash moves opposite to futures
+                cash_txn_notional = -1 * transaction_notional
+                cash_trades = calculate_resize_trades_cash(positions_df, basket_id, cash_txn_notional)
             
             all_trades['cash'] = cash_trades
             
@@ -350,10 +354,14 @@ def render_basket_transaction_page(txn_data: dict):
             
             current_sb_notional = totals['stock_borrow_notional']
             
+            # NOTE: Stock borrow moves with equities (opposite to futures)
+            # If reducing futures long (-$50M), also reduce stock borrow (-$50M)
             if mode == 'unwind':
                 sb_trades = calculate_unwind_trades_stock_borrow(positions_df, basket_id)
             else:
-                sb_trades = calculate_resize_trades_stock_borrow(positions_df, basket_id, transaction_notional)
+                # Flip sign - stock borrow moves opposite to futures
+                sb_txn_notional = -1 * transaction_notional
+                sb_trades = calculate_resize_trades_stock_borrow(positions_df, basket_id, sb_txn_notional)
             
             all_trades['stock_borrow'] = sb_trades
             
@@ -405,14 +413,19 @@ def render_basket_transaction_page(txn_data: dict):
                 st.metric("Position Count", f"{position_count:,}")
             
             # Calculate trades
+            # NOTE: In a hedged basket, equities move OPPOSITE to futures
+            # If transaction_notional is +$50M (buying futures / reducing short),
+            # equities should be -$50M (selling / reducing long) to maintain hedge
             if mode == 'unwind':
                 equity_trades_df = calculate_unwind_trades_equities(positions_df, market_data_df, basket_id)
                 txn_notional_eq = -1 * current_eq_mv
             else:
+                # Flip sign for equities - they hedge futures, so move opposite direction
+                equity_txn_notional = -1 * transaction_notional
                 equity_trades_df = calculate_equity_trades_for_notional(
-                    positions_df, market_data_df, basket_id, transaction_notional
+                    positions_df, market_data_df, basket_id, equity_txn_notional
                 )
-                txn_notional_eq = transaction_notional
+                txn_notional_eq = equity_txn_notional
             
             all_trades['equities'] = equity_trades_df
             

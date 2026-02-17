@@ -148,7 +148,7 @@ def render_derivatives_widget(positions_df: pd.DataFrame, basket_id: str = "") -
                 'mode': 'unwind',
                 'positions_df': positions_df,
             }
-            st.switch_page("pages/_hidden/_5_📊_Futures_Transaction.py")
+            st.switch_page("pages/__Futures_Transaction.py")
     
     with btn_col2:
         if st.button("Resize", key=f"resize_futures_{basket_id}", use_container_width=True):
@@ -157,7 +157,7 @@ def render_derivatives_widget(positions_df: pd.DataFrame, basket_id: str = "") -
                 'mode': 'resize',
                 'positions_df': positions_df,
             }
-            st.switch_page("pages/_hidden/_5_📊_Futures_Transaction.py")
+            st.switch_page("pages/__Futures_Transaction.py")
     
     st.markdown("<div style='margin-bottom: 1rem;'></div>", unsafe_allow_html=True)
     
@@ -294,7 +294,7 @@ def render_physical_shares_widget(positions_df: pd.DataFrame,
                 'position_type': 'EQUITY',
                 'positions_df': positions_df,
             }
-            st.switch_page("pages/_hidden/_7_📈_Equity_Transaction.py")
+            st.switch_page("pages/__Equity_Transaction.py")
     
     with eq_btn2:
         if st.button("Resize", key=f"resize_equities_{basket_id}", use_container_width=True):
@@ -304,7 +304,7 @@ def render_physical_shares_widget(positions_df: pd.DataFrame,
                 'position_type': 'EQUITY',
                 'positions_df': positions_df,
             }
-            st.switch_page("pages/_hidden/_7_📈_Equity_Transaction.py")
+            st.switch_page("pages/__Equity_Transaction.py")
     
     st.markdown("<div style='margin-bottom: 1rem;'></div>", unsafe_allow_html=True)
     
@@ -384,7 +384,7 @@ def render_physical_shares_widget(positions_df: pd.DataFrame,
                         'basket_id': basket_id,
                         'position_id': alert['position_id']
                     }
-                    st.switch_page("pages/_hidden/_3_💱_Transaction.py")
+                    st.switch_page("pages/__Transaction.py")
             
             with col2:
                 st.markdown(f"""
@@ -533,7 +533,7 @@ def render_calendar_events_widget(
                     "event_date": eff_date,
                     "source": "basket_calendar_widget",
                 }
-                st.switch_page("pages/_hidden/_3_💱_Transaction.py")
+                st.switch_page("pages/__Transaction.py")
 
         st.markdown("<div style='margin: 0.5rem 0; border-bottom: 1px solid #333;'></div>", unsafe_allow_html=True)
 
@@ -613,7 +613,7 @@ def render_borrowing_lending_widget(positions_df: pd.DataFrame, basket_id: str =
                     'position_type': pos_type,
                     'positions_df': positions_df,
                 }
-                st.switch_page("pages/_hidden/_6_💰_Cash_Transaction.py")
+                st.switch_page("pages/__Cash_Transaction.py")
         
         with cash_btn2:
             if st.button("Resize", key=f"resize_cash_{basket_id}_{pos_type}_{idx}", use_container_width=True):
@@ -623,7 +623,7 @@ def render_borrowing_lending_widget(positions_df: pd.DataFrame, basket_id: str =
                     'position_type': pos_type,
                     'positions_df': positions_df,
                 }
-                st.switch_page("pages/_hidden/_6_💰_Cash_Transaction.py")
+                st.switch_page("pages/__Cash_Transaction.py")
         
         st.markdown(f"""
             <div style="background-color: #1e1e1e; border: 1px solid #333; border-top: none; border-radius: 0 0 4px 4px; 
@@ -695,7 +695,7 @@ def render_borrowing_lending_widget(positions_df: pd.DataFrame, basket_id: str =
                     'position_type': 'STOCK_BORROW',
                     'positions_df': positions_df,
                 }
-                st.switch_page("pages/_hidden/_7_📈_Equity_Transaction.py")
+                st.switch_page("pages/__Equity_Transaction.py")
         
         with sb_btn2:
             if st.button("Resize", key=f"resize_stock_borrow_{basket_id}", use_container_width=True):
@@ -705,7 +705,7 @@ def render_borrowing_lending_widget(positions_df: pd.DataFrame, basket_id: str =
                     'position_type': 'STOCK_BORROW',
                     'positions_df': positions_df,
                 }
-                st.switch_page("pages/_hidden/_7_📈_Equity_Transaction.py")
+                st.switch_page("pages/__Equity_Transaction.py")
         
         # Summary card for stock borrows (body)
         st.markdown(f"""
@@ -797,7 +797,7 @@ def render_whole_basket_summary(basket_id: str, positions_df: pd.DataFrame) -> N
                 'mode': 'unwind',
                 'positions_df': positions_df,
             }
-            st.switch_page("pages/_hidden/_8_🎯_Basket_Transaction.py")
+            st.switch_page("pages/__Basket_Transaction.py")
     
     with btn_col2:
         st.markdown("<div style='height: 0.5rem;'></div>", unsafe_allow_html=True)
@@ -807,7 +807,7 @@ def render_whole_basket_summary(basket_id: str, positions_df: pd.DataFrame) -> N
                 'mode': 'resize',
                 'positions_df': positions_df,
             }
-            st.switch_page("pages/_hidden/_8_🎯_Basket_Transaction.py")
+            st.switch_page("pages/__Basket_Transaction.py")
     
     st.markdown("<div style='margin-bottom: 1rem;'></div>", unsafe_allow_html=True)
     
