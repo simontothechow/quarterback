@@ -1,0 +1,42 @@
+# Streamlit Pages Configuration
+# Only pages listed here will appear in the sidebar navigation
+
+[[pages]]
+path = "app.py"
+name = "Home"
+icon = "🏠"
+
+[[pages]]
+path = "pages/1_📊_Basket_Detail.py"
+name = "Basket Detail"
+icon = "📊"
+
+[[pages]]
+path = "pages/2_📅_Calendar.py"
+name = "Calendar"
+icon = "📅"
+
+[[pages]]
+path = "pages/4_🧾_Transactions_Menu.py"
+name = "Transactions"
+icon = "🧾"
+
+[[pages]]
+path = "pages/9_📦_New_Basket.py"
+name = "New Basket"
+icon = "📦"
+
+[[pages]]
+path = "pages/10_📊_Quick_Futures.py"
+name = "Quick Futures"
+icon = "📊"
+
+[[pages]]
+path = "pages/11_📈_Quick_Equity.py"
+name = "Quick Equity"
+icon = "📈"
+
+[[pages]]
+path = "pages/12_💰_Quick_Cash.py"
+name = "Quick Cash"
+icon = "💰"

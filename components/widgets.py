@@ -863,6 +863,7 @@ def render_whole_basket_summary(basket_id: str, positions_df: pd.DataFrame) -> N
 def get_basket_alerts(basket_id: str, positions_df: pd.DataFrame) -> list:
     """
     Get alerts for a basket based on positions and upcoming events.
+    Alerts are grouped by position type to avoid hundreds of individual alerts.
     
     Args:
         basket_id: The basket identifier
@@ -879,12 +880,16 @@ def get_basket_alerts(basket_id: str, positions_df: pd.DataFrame) -> list:
     if metrics['hedge_alert']:
         alerts.append({
             'type': 'Physical Share Transaction Required',
-            'message': f"Net equity exposure ${metrics['net_equity_exposure']:,.0f} exceeds threshold",
+            'message': f"{basket_id}: Net equity exposure ${metrics['net_equity_exposure']:,.0f} exceeds threshold",
             'severity': 'high'
         })
     
-    # Check for upcoming maturities
+    # Check for upcoming maturities - GROUP by position type and days to maturity
     if 'END_DATE' in positions_df.columns:
+        # Collect maturity data for grouping
+        maturity_groups = {}  # key: (pos_type, days_to_end, severity), value: {'count': N, 'notional': X}
+        roll_groups = {}  # key: (pos_type, days_to_end), value: {'count': N, 'notional': X}
+        
         for _, pos in positions_df.iterrows():
             end_date = pos.get('END_DATE')
             if pd.notna(end_date):
@@ -894,22 +899,74 @@ def get_basket_alerts(basket_id: str, positions_df: pd.DataFrame) -> list:
                     end_date = end_date.date()
                 
                 days_to_end = (end_date - today).days
+                pos_type = pos.get('POSITION_TYPE', 'Position')
+                notional = abs(pos.get('NOTIONAL_USD', 0) or pos.get('MARKET_VALUE', 0) or 0)
                 
                 if 0 <= days_to_end <= 3:
-                    pos_type = pos.get('POSITION_TYPE', 'Position')
-                    alerts.append({
-                        'type': 'Maturity Upcoming',
-                        'message': f"{pos_type} matures in {days_to_end} day(s)",
-                        'severity': 'high'
-                    })
+                    key = (pos_type, days_to_end, 'high')
+                    if key not in maturity_groups:
+                        maturity_groups[key] = {'count': 0, 'notional': 0}
+                    maturity_groups[key]['count'] += 1
+                    maturity_groups[key]['notional'] += notional
+                    
                 elif 3 < days_to_end <= 7:
-                    pos_type = pos.get('POSITION_TYPE', 'Position')
                     if pos.get('ROLL_EVENT_FLAG') == 'TRUE' or pos.get('ROLL_EVENT_FLAG') == True:
-                        alerts.append({
-                            'type': 'Roll Upcoming',
-                            'message': f"{pos_type} roll in {days_to_end} day(s)",
-                            'severity': 'medium'
-                        })
+                        key = (pos_type, days_to_end)
+                        if key not in roll_groups:
+                            roll_groups[key] = {'count': 0, 'notional': 0}
+                        roll_groups[key]['count'] += 1
+                        roll_groups[key]['notional'] += notional
+        
+        # Create grouped maturity alerts
+        for (pos_type, days_to_end, severity), data in maturity_groups.items():
+            count = data['count']
+            notional = data['notional']
+            
+            # Format notional nicely
+            if notional >= 1_000_000_000:
+                notional_str = f"${notional / 1_000_000_000:.1f}B"
+            elif notional >= 1_000_000:
+                notional_str = f"${notional / 1_000_000:.1f}M"
+            else:
+                notional_str = f"${notional:,.0f}"
+            
+            day_word = "day" if days_to_end == 1 else "days"
+            
+            if count == 1:
+                message = f"{basket_id}: {pos_type} ({notional_str}) matures in {days_to_end} {day_word}"
+            else:
+                message = f"{basket_id}: {count} {pos_type} positions ({notional_str} total) mature in {days_to_end} {day_word}"
+            
+            alerts.append({
+                'type': 'Maturity Upcoming',
+                'message': message,
+                'severity': severity
+            })
+        
+        # Create grouped roll alerts
+        for (pos_type, days_to_end), data in roll_groups.items():
+            count = data['count']
+            notional = data['notional']
+            
+            if notional >= 1_000_000_000:
+                notional_str = f"${notional / 1_000_000_000:.1f}B"
+            elif notional >= 1_000_000:
+                notional_str = f"${notional / 1_000_000:.1f}M"
+            else:
+                notional_str = f"${notional:,.0f}"
+            
+            day_word = "day" if days_to_end == 1 else "days"
+            
+            if count == 1:
+                message = f"{basket_id}: {pos_type} ({notional_str}) roll in {days_to_end} {day_word}"
+            else:
+                message = f"{basket_id}: {count} {pos_type} positions ({notional_str} total) roll in {days_to_end} {day_word}"
+            
+            alerts.append({
+                'type': 'Roll Upcoming',
+                'message': message,
+                'severity': 'medium'
+            })
     
     return alerts
 
