@@ -25,18 +25,7 @@ from modules.calculations import (
     get_affected_baskets_for_ticker,
     calculate_event_trade_recommendations
 )
-from components.theme import apply_theme, COLORS
-
-# Page configuration
-st.set_page_config(
-    page_title="Calendar | Quarterback",
-    page_icon="📅",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Apply theme
-apply_theme()
+from components.theme import COLORS
 
 # Load data
 positions_df = get_cached_data('positions')
@@ -913,21 +902,8 @@ def render_list_view(events: list, start_date, end_date):
             """, unsafe_allow_html=True)
 
 
-# Sidebar - Back button and filters
+# Sidebar - Page-specific filters
 with st.sidebar:
-    if st.button("← Back to Home", key="back_btn", use_container_width=True):
-        st.switch_page("app.py")
-    
-    st.markdown("---")
-    st.markdown("### Navigation")
-    if st.button("📊 Basket Detail", use_container_width=True):
-        st.switch_page("pages/1_📊_Basket_Detail.py")
-    if st.button("🧾 Transactions", use_container_width=True):
-        st.switch_page("pages/4_🧾_Transactions_Menu.py")
-    if st.button("📦 New Basket", use_container_width=True):
-        st.switch_page("pages/9_📦_New_Basket.py")
-    
-    st.markdown("---")
     st.markdown("### 🔍 Filters")
     
     # Basket filter

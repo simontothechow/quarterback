@@ -22,23 +22,12 @@ import io
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from modules.data_loader import get_cached_data, get_basket_list
-from components.theme import apply_theme, COLORS
+from components.theme import COLORS
 from modules.calculations import (
     calculate_equity_trades_for_notional,
     calculate_futures_contracts_from_notional,
     SPX_FUTURES_MULTIPLIER,
 )
-
-# Page configuration
-st.set_page_config(
-    page_title="New Basket | Quarterback",
-    page_icon="📦",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Apply theme
-apply_theme()
 
 
 def _ensure_trade_blotter():
@@ -73,24 +62,6 @@ if 'new_basket_id' not in st.session_state:
     st.session_state['new_basket_id'] = _get_next_basket_id(positions_df)
 
 new_basket_id = st.session_state['new_basket_id']
-
-
-# =============================================================================
-# SIDEBAR NAVIGATION
-# =============================================================================
-with st.sidebar:
-    if st.button("← Back to Home", use_container_width=True):
-        st.switch_page("app.py")
-    
-    st.markdown("---")
-    st.markdown("### Navigation")
-    
-    if st.button("📊 Basket Detail", use_container_width=True):
-        st.switch_page("pages/1_📊_Basket_Detail.py")
-    if st.button("📅 Calendar", use_container_width=True):
-        st.switch_page("pages/2_📅_Calendar.py")
-    if st.button("🧾 Trade Blotter", use_container_width=True):
-        st.switch_page("pages/4_🧾_Transactions_Menu.py")
 
 
 # =============================================================================

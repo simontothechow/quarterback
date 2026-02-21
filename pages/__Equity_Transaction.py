@@ -21,7 +21,7 @@ import io
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from modules.data_loader import get_cached_data
-from components.theme import apply_theme, COLORS
+from components.theme import COLORS
 from modules.calculations import (
     calculate_unwind_trades_equities,
     calculate_equity_trades_for_notional,
@@ -31,17 +31,6 @@ from modules.calculations import (
     calculate_equivalent_futures_contracts,
     SPX_FUTURES_MULTIPLIER,
 )
-
-# Page configuration
-st.set_page_config(
-    page_title="Equity Transaction | Quarterback",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
-# Apply theme
-apply_theme()
 
 
 def _ensure_trade_blotter():
@@ -249,13 +238,15 @@ def render_equity_transaction_page(txn_data: dict):
                 'TRANSACTION_VALUE', 'SHARES_TRANSACTED', 'SHARES_AFTER', 'MARKET_VALUE_AFTER'
             ]].copy()
             
-            # Round numeric columns for clean display
-            display_df['CURRENT_SHARES'] = display_df['CURRENT_SHARES'].round(0).astype(int)
-            display_df['CURRENT_MARKET_VALUE'] = display_df['CURRENT_MARKET_VALUE'].round(2)
-            display_df['TRANSACTION_VALUE'] = display_df['TRANSACTION_VALUE'].round(2)
-            display_df['SHARES_TRANSACTED'] = display_df['SHARES_TRANSACTED'].round(0).astype(int)
-            display_df['SHARES_AFTER'] = display_df['SHARES_AFTER'].round(0).astype(int)
-            display_df['MARKET_VALUE_AFTER'] = display_df['MARKET_VALUE_AFTER'].round(2)
+            # Fill NaN values and round numeric columns for clean display
+            display_df['CURRENT_SHARES'] = display_df['CURRENT_SHARES'].fillna(0).round(0).astype(int)
+            display_df['CURRENT_MARKET_VALUE'] = display_df['CURRENT_MARKET_VALUE'].fillna(0).round(2)
+            display_df['TRANSACTION_VALUE'] = display_df['TRANSACTION_VALUE'].fillna(0).round(2)
+            display_df['SHARES_TRANSACTED'] = display_df['SHARES_TRANSACTED'].fillna(0).round(0).astype(int)
+            display_df['SHARES_AFTER'] = display_df['SHARES_AFTER'].fillna(0).round(0).astype(int)
+            display_df['MARKET_VALUE_AFTER'] = display_df['MARKET_VALUE_AFTER'].fillna(0).round(2)
+            display_df['TICKER'] = display_df['TICKER'].fillna('')
+            display_df['COMPANY'] = display_df['COMPANY'].fillna('')
             
             # Make it editable
             st.markdown("**Edit Transaction Value or Shares as needed.** Press Enter to confirm edits.")

@@ -20,7 +20,7 @@ import io
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from modules.data_loader import get_cached_data
-from components.theme import apply_theme, COLORS
+from components.theme import COLORS
 from modules.calculations import (
     calculate_basket_component_totals,
     calculate_basket_unwind_all,
@@ -37,17 +37,6 @@ from modules.calculations import (
     calculate_futures_contracts_from_notional,
     SPX_FUTURES_MULTIPLIER,
 )
-
-# Page configuration
-st.set_page_config(
-    page_title="Basket Transaction | Quarterback",
-    page_icon="🎯",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
-# Apply theme
-apply_theme()
 
 
 def _ensure_trade_blotter():
@@ -297,14 +286,14 @@ def render_basket_transaction_page(txn_data: dict):
         with tabs[tab_idx]:
             st.markdown("### Cash Borrow/Lend Positions")
             
-            # NOTE: Cash financing moves with equities (opposite to futures)
-            # If reducing futures short (+$50M), also reduce cash borrow (-$50M)
+            # NOTE: Cash financing moves in SAME direction as futures
+            # Simple Carry: reduce futures short (+$50M) → sell equities → REPAY cash (+$50M)
+            # Reverse Carry: reduce futures long (-$50M) → buy equities → RECALL lent cash (-$50M)
             if mode == 'unwind':
                 cash_trades = calculate_unwind_trades_cash(positions_df, basket_id)
             else:
-                # Flip sign - cash moves opposite to futures
-                cash_txn_notional = -1 * transaction_notional
-                cash_trades = calculate_resize_trades_cash(positions_df, basket_id, cash_txn_notional)
+                # Same direction as futures (no sign flip)
+                cash_trades = calculate_resize_trades_cash(positions_df, basket_id, transaction_notional)
             
             all_trades['cash'] = cash_trades
             
@@ -449,13 +438,15 @@ def render_basket_transaction_page(txn_data: dict):
                     'TRANSACTION_VALUE', 'SHARES_TRANSACTED', 'SHARES_AFTER', 'MARKET_VALUE_AFTER'
                 ]].copy()
                 
-                # Round numeric columns for clean display
-                display_df['CURRENT_SHARES'] = display_df['CURRENT_SHARES'].round(0).astype(int)
-                display_df['CURRENT_MARKET_VALUE'] = display_df['CURRENT_MARKET_VALUE'].round(2)
-                display_df['TRANSACTION_VALUE'] = display_df['TRANSACTION_VALUE'].round(2)
-                display_df['SHARES_TRANSACTED'] = display_df['SHARES_TRANSACTED'].round(0).astype(int)
-                display_df['SHARES_AFTER'] = display_df['SHARES_AFTER'].round(0).astype(int)
-                display_df['MARKET_VALUE_AFTER'] = display_df['MARKET_VALUE_AFTER'].round(2)
+                # Fill NaN values and round numeric columns for clean display
+                display_df['CURRENT_SHARES'] = display_df['CURRENT_SHARES'].fillna(0).round(0).astype(int)
+                display_df['CURRENT_MARKET_VALUE'] = display_df['CURRENT_MARKET_VALUE'].fillna(0).round(2)
+                display_df['TRANSACTION_VALUE'] = display_df['TRANSACTION_VALUE'].fillna(0).round(2)
+                display_df['SHARES_TRANSACTED'] = display_df['SHARES_TRANSACTED'].fillna(0).round(0).astype(int)
+                display_df['SHARES_AFTER'] = display_df['SHARES_AFTER'].fillna(0).round(0).astype(int)
+                display_df['MARKET_VALUE_AFTER'] = display_df['MARKET_VALUE_AFTER'].fillna(0).round(2)
+                display_df['TICKER'] = display_df['TICKER'].fillna('')
+                display_df['COMPANY'] = display_df['COMPANY'].fillna('')
                 
                 # Show first 50 rows with option to expand
                 st.dataframe(

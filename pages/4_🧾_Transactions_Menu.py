@@ -17,44 +17,12 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from components.theme import apply_theme
-
-
 def _ensure_trade_blotter():
     if "trade_blotter" not in st.session_state:
         st.session_state["trade_blotter"] = []
 
 
-st.set_page_config(
-    page_title="Transactions | Quarterback",
-    page_icon="🧾",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-apply_theme()
 _ensure_trade_blotter()
-
-
-# Sidebar navigation
-with st.sidebar:
-    if st.button("← Back to Home", key="back_home", use_container_width=True):
-        st.switch_page("app.py")
-
-    st.markdown("---")
-    st.markdown("### Navigation")
-
-    if st.button("📊 Basket Detail", use_container_width=True):
-        st.switch_page("pages/1_📊_Basket_Detail.py")
-
-    if st.button("📅 Calendar View", use_container_width=True):
-        st.switch_page("pages/2_📅_Calendar.py")
-
-    if st.button("🧾 Transactions", use_container_width=True, disabled=True):
-        pass
-    
-    if st.button("📦 New Basket", use_container_width=True):
-        st.switch_page("pages/9_📦_New_Basket.py")
 
 
 st.markdown("""

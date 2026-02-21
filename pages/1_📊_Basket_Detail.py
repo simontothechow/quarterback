@@ -15,23 +15,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from modules.data_loader import (
     get_cached_data, get_basket_positions, get_basket_list
 )
-from components.theme import apply_theme, COLORS
+from components.theme import COLORS
 from components.widgets import (
     render_whole_basket_summary, render_derivatives_widget,
     render_physical_shares_widget, render_borrowing_lending_widget,
     render_calendar_events_widget
 )
-
-# Page configuration
-st.set_page_config(
-    page_title="Basket Detail | Quarterback",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Apply theme
-apply_theme()
 
 # Load data
 positions_df = get_cached_data('positions')
@@ -41,12 +30,8 @@ corp_actions = get_cached_data('corp_actions')
 # Get basket list
 baskets = get_basket_list(positions_df)
 
-# Sidebar - Back button and basket selection
+# Sidebar - Page-specific options
 with st.sidebar:
-    if st.button("← Back to Home", key="back_btn", use_container_width=True):
-        st.switch_page("app.py")
-    
-    st.markdown("---")
     st.markdown("### Select Basket")
     
     # Get selected basket from session state or default to first
@@ -65,24 +50,6 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Display Options")
     show_expanded = st.checkbox("Expanded Shares View", value=False)
-
-    st.markdown("---")
-    st.markdown("### Navigation")
-    if st.button("📅 Calendar View", use_container_width=True):
-        st.switch_page("pages/2_📅_Calendar.py")
-    if st.button("🧾 Transactions", use_container_width=True):
-        st.switch_page("pages/4_🧾_Transactions_Menu.py")
-    if st.button("📦 New Basket", use_container_width=True):
-        st.switch_page("pages/9_📦_New_Basket.py")
-    
-    st.markdown("---")
-    st.markdown("### Quick Trades")
-    if st.button("📊 Futures Trade", use_container_width=True):
-        st.switch_page("pages/10_📊_Quick_Futures.py")
-    if st.button("📈 Equity Package", use_container_width=True):
-        st.switch_page("pages/11_📈_Quick_Equity.py")
-    if st.button("💰 Cash Trade", use_container_width=True):
-        st.switch_page("pages/12_💰_Quick_Cash.py")
 
 # Main content
 if selected_basket:

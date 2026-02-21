@@ -16,19 +16,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from modules.data_loader import get_cached_data
-from components.theme import apply_theme, COLORS
+from components.theme import COLORS
 from modules.calculations import calculate_trade_value
-
-# Page configuration
-st.set_page_config(
-    page_title="Transaction | Quarterback",
-    page_icon="💱",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
-# Apply theme
-apply_theme()
 
 # Get transaction details from session state
 transaction = st.session_state.get('pending_transaction', None)

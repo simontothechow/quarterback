@@ -16,18 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from modules.data_loader import get_cached_data, get_basket_list
-from components.theme import apply_theme, COLORS
-
-# Page configuration
-st.set_page_config(
-    page_title="Quick Cash Trade | Quarterback",
-    page_icon="💰",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Apply theme
-apply_theme()
+from components.theme import COLORS
 
 
 def _ensure_trade_blotter():
