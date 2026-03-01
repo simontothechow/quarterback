@@ -2605,3 +2605,361 @@ def filter_opportunities_by_criteria(
     opportunities.sort(key=lambda x: x['forward_rate'], reverse=True)
     
     return opportunities
+
+
+# =============================================================================
+# OPPORTUNITIES SECTION - DV01 AND ARBITRAGE CALCULATIONS
+# =============================================================================
+
+def calculate_dv01_calendar_spread(
+    notional: float,
+    period_days: int
+) -> float:
+    """
+    Calculate DV01 for a calendar spread position.
+    
+    For a calendar spread (long near, short far), the DV01 depends on
+    the period between the two contract maturities, not absolute days.
+    
+    Formula: DV01 = Notional × (period_days / 360) × 0.0001
+    
+    Args:
+        notional: Position notional in USD
+        period_days: Days between near and far contract maturities
+    
+    Returns:
+        DV01 in USD (P&L change per 1 bp rate move)
+    
+    Example:
+        >>> calculate_dv01_calendar_spread(100_000_000, 90)
+        2500.0  # $2,500 DV01 for $100M over 90-day period
+    """
+    if period_days <= 0:
+        return 0.0
+    
+    time_factor = period_days / DAYS_IN_YEAR
+    dv01 = abs(notional) * time_factor * BASIS_POINT
+    return round(dv01, 2)
+
+
+def calculate_notional_from_dv01_budget(
+    dv01_budget: float,
+    period_days: int
+) -> float:
+    """
+    Calculate the maximum notional size given a DV01 budget.
+    
+    This is the inverse of calculate_dv01_calendar_spread().
+    Used for sizing trades based on risk tolerance.
+    
+    Formula: Notional = DV01_budget / ((period_days / 360) × 0.0001)
+    
+    Args:
+        dv01_budget: Maximum allowable DV01 in USD
+        period_days: Days between contract maturities
+    
+    Returns:
+        Maximum notional in USD that fits within DV01 budget
+    
+    Example:
+        >>> calculate_notional_from_dv01_budget(3000, 90)
+        120000000.0  # $120M notional fits within $3K DV01 budget
+    """
+    if period_days <= 0 or dv01_budget <= 0:
+        return 0.0
+    
+    time_factor = period_days / DAYS_IN_YEAR
+    notional = dv01_budget / (time_factor * BASIS_POINT)
+    return round(notional, 0)
+
+
+def calculate_spot_arb_metrics(
+    futures_rate: float,
+    box_rate: float,
+    notional: float,
+    days_to_expiry: int
+) -> dict:
+    """
+    Calculate P&L and risk metrics for a Spot Cash & Carry arbitrage.
+    
+    Strategy: Own stocks + Sell futures + Borrow via box spread
+    
+    The arbitrage profit comes from the spread between:
+    - What you EARN: Futures implied rate (equity financing rate)
+    - What you PAY: Box spread rate (risk-free rate)
+    
+    Args:
+        futures_rate: Implied futures financing rate (as decimal, e.g., 0.0558)
+        box_rate: Box spread borrowing rate (as decimal, e.g., 0.0530)
+        notional: Position notional in USD
+        days_to_expiry: Days until expiration
+    
+    Returns:
+        Dictionary with:
+            - spread_bps: Arbitrage spread in basis points
+            - gross_pnl: Gross P&L in USD
+            - annualized_spread_bps: Spread annualized
+            - dv01: Interest rate risk
+            - holding_period: Days
+    
+    Example:
+        >>> calculate_spot_arb_metrics(0.0558, 0.0530, 100_000_000, 90)
+        {'spread_bps': 28, 'gross_pnl': 70000, ...}
+    """
+    # Calculate spread
+    spread = futures_rate - box_rate
+    spread_bps = spread * 10000
+    
+    # Calculate P&L for holding period
+    time_factor = days_to_expiry / DAYS_IN_YEAR
+    gross_pnl = spread * abs(notional) * time_factor
+    
+    # Annualize the spread
+    annualized_spread_bps = spread_bps  # Already annualized rates
+    
+    # DV01 for spot position (depends on time to expiry)
+    dv01 = calculate_dv01(notional, days_to_expiry)
+    
+    return {
+        'spread_bps': round(spread_bps, 1),
+        'gross_pnl': round(gross_pnl, 2),
+        'annualized_spread_bps': round(annualized_spread_bps, 1),
+        'dv01': round(dv01, 2),
+        'holding_period_days': days_to_expiry,
+        'futures_rate_pct': round(futures_rate * 100, 2),
+        'box_rate_pct': round(box_rate * 100, 2),
+        'notional': notional,
+    }
+
+
+def calculate_forward_arb_metrics(
+    fwd_futures_rate: float,
+    fwd_box_rate: float,
+    notional: float,
+    period_days: int
+) -> dict:
+    """
+    Calculate P&L and risk metrics for a Forward Arbitrage.
+    
+    Strategy: Calendar futures spread + Calendar box spread
+    - Long near futures / Short far futures (captures forward equity rate)
+    - Short near box / Long far box (pays forward SOFR)
+    
+    This is a forward-starting version of the spot arb that doesn't
+    require holding physical stocks.
+    
+    Args:
+        fwd_futures_rate: Forward implied futures rate (as decimal)
+        fwd_box_rate: Forward box spread rate (as decimal)
+        notional: Position notional in USD
+        period_days: Days in the forward period
+    
+    Returns:
+        Dictionary with forward arb metrics
+    
+    Example:
+        >>> calculate_forward_arb_metrics(0.0555, 0.0528, 100_000_000, 90)
+        {'spread_bps': 27, 'gross_pnl': 6750, ...}
+    """
+    # Calculate spread
+    spread = fwd_futures_rate - fwd_box_rate
+    spread_bps = spread * 10000
+    
+    # Calculate P&L for forward period
+    time_factor = period_days / DAYS_IN_YEAR
+    gross_pnl = spread * abs(notional) * time_factor
+    
+    # Annualize
+    if period_days > 0:
+        annualized_spread_bps = spread_bps * (365 / period_days) * time_factor
+    else:
+        annualized_spread_bps = 0
+    
+    # DV01 for calendar spread
+    dv01 = calculate_dv01_calendar_spread(notional, period_days)
+    
+    return {
+        'spread_bps': round(spread_bps, 1),
+        'gross_pnl': round(gross_pnl, 2),
+        'annualized_spread_bps': round(annualized_spread_bps, 1),
+        'dv01': round(dv01, 2),
+        'period_days': period_days,
+        'fwd_futures_rate_pct': round(fwd_futures_rate * 100, 2),
+        'fwd_box_rate_pct': round(fwd_box_rate * 100, 2),
+        'notional': notional,
+    }
+
+
+def generate_synthetic_historical_spreads(
+    current_spread_bps: float,
+    days: int = 90,
+    volatility_bps: float = 5.0,
+    mean_reversion: float = 0.1
+) -> list:
+    """
+    Generate synthetic historical spread data for demo purposes.
+    
+    Creates a realistic-looking time series that mean-reverts to
+    a long-term average with daily volatility.
+    
+    Args:
+        current_spread_bps: Current spread level (end point)
+        days: Number of days of history to generate
+        volatility_bps: Daily volatility in basis points
+        mean_reversion: Speed of mean reversion (0-1)
+    
+    Returns:
+        List of dicts with 'date' and 'spread_bps' for each day
+    
+    Example:
+        >>> history = generate_synthetic_historical_spreads(30, 90)
+        >>> len(history)
+        90
+    """
+    # Work backwards from current spread
+    spreads = [current_spread_bps]
+    
+    # Long-term mean (slightly below current for upward trend visual)
+    long_term_mean = current_spread_bps * 0.85
+    
+    # Generate backwards (so current is the end)
+    for i in range(days - 1):
+        prev_spread = spreads[-1]
+        
+        # Mean reversion component
+        reversion = mean_reversion * (long_term_mean - prev_spread)
+        
+        # Random walk component
+        random_shock = np.random.normal(0, volatility_bps)
+        
+        # Previous day's spread (going backwards)
+        prev_day_spread = prev_spread - reversion - random_shock
+        
+        # Floor at 0
+        prev_day_spread = max(0, prev_day_spread)
+        
+        spreads.append(prev_day_spread)
+    
+    # Reverse to get chronological order
+    spreads = spreads[::-1]
+    
+    # Create date series
+    today = get_valuation_date()
+    history = []
+    for i, spread in enumerate(spreads):
+        history_date = today - timedelta(days=days - 1 - i)
+        history.append({
+            'date': history_date,
+            'spread_bps': round(spread, 1)
+        })
+    
+    return history
+
+
+def calculate_percentile_vs_history(
+    current_value: float,
+    historical_values: list
+) -> float:
+    """
+    Calculate what percentile the current value is vs history.
+    
+    Args:
+        current_value: Current spread or rate
+        historical_values: List of historical values
+    
+    Returns:
+        Percentile (0-100)
+    
+    Example:
+        >>> calculate_percentile_vs_history(35, [20, 25, 30, 32, 34])
+        100.0  # Current is highest
+    """
+    if not historical_values:
+        return 50.0
+    
+    below_count = sum(1 for v in historical_values if v < current_value)
+    percentile = (below_count / len(historical_values)) * 100
+    return round(percentile, 1)
+
+
+def calculate_box_spread_rate(
+    sofr_rate: float,
+    days_to_expiry: int,
+    discount_bps: float = 3.0
+) -> float:
+    """
+    Calculate implied box spread rate based on SOFR.
+    
+    Box spreads typically trade slightly below SOFR due to:
+    - Bid/ask spread on 4 option legs
+    - Execution costs
+    - Counterparty considerations
+    
+    Args:
+        sofr_rate: Current SOFR rate (as decimal)
+        days_to_expiry: Days until box expiration
+        discount_bps: Discount below SOFR in basis points
+    
+    Returns:
+        Implied box spread rate (as decimal)
+    
+    Example:
+        >>> calculate_box_spread_rate(0.0367, 90, 3)
+        0.0364  # 3.64% (3 bps below SOFR)
+    """
+    discount = discount_bps / 10000
+    return sofr_rate - discount
+
+
+def calculate_futures_implied_rate_from_sofr(
+    sofr_rate: float,
+    premium_bps: float = 30.0
+) -> float:
+    """
+    Calculate expected futures implied rate based on SOFR + equity premium.
+    
+    Futures typically imply rates ~20-40 bps above SOFR due to
+    the equity balance sheet premium.
+    
+    Args:
+        sofr_rate: Current SOFR rate (as decimal)
+        premium_bps: Equity premium over SOFR in basis points
+    
+    Returns:
+        Expected futures implied rate (as decimal)
+    
+    Example:
+        >>> calculate_futures_implied_rate_from_sofr(0.0367, 30)
+        0.0397  # 3.97% (30 bps above SOFR)
+    """
+    premium = premium_bps / 10000
+    return sofr_rate + premium
+
+
+def get_best_opportunity_for_tenor(
+    opportunities: list,
+    min_days: int,
+    max_days: int,
+    metric: str = 'forward_rate'
+) -> dict:
+    """
+    Get the best opportunity within a tenor bucket.
+    
+    Args:
+        opportunities: List of opportunity dicts from filter_opportunities_by_criteria
+        min_days: Minimum period days for the bucket
+        max_days: Maximum period days for the bucket
+        metric: Which metric to maximize ('forward_rate' or 'annualized_carry')
+    
+    Returns:
+        Best opportunity dict, or None if none found
+    """
+    bucket_opps = [
+        opp for opp in opportunities 
+        if min_days <= opp.get('period_days', 0) <= max_days
+    ]
+    
+    if not bucket_opps:
+        return None
+    
+    return max(bucket_opps, key=lambda x: x.get(metric, 0))

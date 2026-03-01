@@ -535,3 +535,203 @@ def load_futures_prices(file_path: Optional[str] = None) -> pd.DataFrame:
         df = df.sort_values('Days_to_maturity', na_position='last')
     
     return df
+
+
+def generate_mock_box_spreads(
+    futures_df: pd.DataFrame,
+    sofr_rate: float = None
+) -> pd.DataFrame:
+    """
+    Generate plausible mock box spread data based on futures maturities.
+    
+    Box spreads trade at approximately SOFR minus a small friction discount.
+    This generates realistic demo data matching the futures contract schedule.
+    
+    Args:
+        futures_df: DataFrame from load_futures_prices() with maturity dates
+        sofr_rate: SOFR rate as decimal. If None, loads from config.
+    
+    Returns:
+        DataFrame with columns:
+            - Expiry: Expiration date
+            - Expiry_Label: Display label (e.g., "Mar 2026")
+            - Days_to_Expiry: Days until expiration
+            - Box_Rate: Implied rate (decimal)
+            - Box_Rate_Pct: Implied rate as percentage
+            - Strike_Width: Box strike width (e.g., 100)
+    
+    Example:
+        >>> futures = load_futures_prices()
+        >>> boxes = generate_mock_box_spreads(futures)
+        >>> boxes['Box_Rate_Pct'].iloc[0]
+        3.64  # Close to but slightly below SOFR
+    """
+    if sofr_rate is None:
+        # Import here to avoid circular imports
+        from modules.opportunities_config import SOFR_RATE
+        sofr_rate = SOFR_RATE
+    
+    if futures_df.empty:
+        return pd.DataFrame(columns=[
+            'Expiry', 'Expiry_Label', 'Days_to_Expiry', 
+            'Box_Rate', 'Box_Rate_Pct', 'Strike_Width'
+        ])
+    
+    # Use numpy for reproducible random generation
+    np.random.seed(42)
+    
+    records = []
+    for _, row in futures_df.iterrows():
+        expiry = row.get('Maturity')
+        days = row.get('Days_to_maturity', 0)
+        
+        if pd.isna(expiry) or pd.isna(days) or days <= 0:
+            continue
+        
+        # Generate discount: 2-5 bps below SOFR
+        # Longer maturities tend to have slightly wider discounts
+        base_discount = 2 + (days / 365) * 2  # 2-4 bps based on maturity
+        random_adjustment = np.random.uniform(-0.5, 0.5)
+        discount_bps = base_discount + random_adjustment
+        
+        box_rate = sofr_rate - (discount_bps / 10000)
+        
+        # Create expiry label
+        if isinstance(expiry, pd.Timestamp):
+            expiry_label = expiry.strftime("%b %Y")
+        else:
+            try:
+                expiry_label = pd.to_datetime(expiry).strftime("%b %Y")
+            except:
+                expiry_label = str(expiry)
+        
+        records.append({
+            'Expiry': expiry,
+            'Expiry_Label': expiry_label,
+            'Days_to_Expiry': int(days),
+            'Box_Rate': round(box_rate, 6),
+            'Box_Rate_Pct': round(box_rate * 100, 3),
+            'Strike_Width': 100,  # Standard SPX box width
+            'Discount_Bps': round(discount_bps, 1),
+        })
+    
+    df = pd.DataFrame(records)
+    
+    # Sort by days to expiry
+    if not df.empty:
+        df = df.sort_values('Days_to_Expiry').reset_index(drop=True)
+    
+    return df
+
+
+def generate_mock_futures_rates(
+    futures_df: pd.DataFrame,
+    sofr_rate: float = None
+) -> pd.DataFrame:
+    """
+    Generate implied futures rates from futures prices for Opportunities page.
+    
+    This provides a consistent rate view that can be compared to box spreads.
+    Uses the actual futures prices and converts to implied financing rates.
+    
+    Args:
+        futures_df: DataFrame from load_futures_prices()
+        sofr_rate: SOFR rate for premium calculation reference
+    
+    Returns:
+        DataFrame with columns:
+            - Contract_Code: Futures contract identifier
+            - Expiry: Maturity date
+            - Expiry_Label: Display label
+            - Days_to_Expiry: Days until expiration
+            - Futures_Rate: Implied rate (decimal)
+            - Futures_Rate_Pct: Implied rate as percentage
+            - Premium_Over_SOFR_Bps: Basis points above SOFR
+    """
+    if sofr_rate is None:
+        from modules.opportunities_config import SOFR_RATE
+        sofr_rate = SOFR_RATE
+    
+    if futures_df.empty:
+        return pd.DataFrame()
+    
+    # Use reproducible random for premium variation
+    np.random.seed(43)
+    
+    records = []
+    for _, row in futures_df.iterrows():
+        contract = row.get('Contract_Code', '')
+        expiry = row.get('Maturity')
+        days = row.get('Days_to_maturity', 0)
+        price = row.get('last_price', 0)
+        
+        if pd.isna(days) or days <= 0:
+            continue
+        
+        # Calculate implied rate from futures price (basis points)
+        # For AIR futures, price IS the rate in bps
+        # Convert to decimal rate
+        futures_rate = price / 10000 if pd.notna(price) else sofr_rate + 0.003
+        
+        # Calculate premium over SOFR
+        premium_bps = (futures_rate - sofr_rate) * 10000
+        
+        # Create expiry label
+        if isinstance(expiry, pd.Timestamp):
+            expiry_label = expiry.strftime("%b %Y")
+        elif pd.notna(expiry):
+            try:
+                expiry_label = pd.to_datetime(expiry).strftime("%b %Y")
+            except:
+                expiry_label = str(expiry)
+        else:
+            expiry_label = contract
+        
+        records.append({
+            'Contract_Code': contract,
+            'Expiry': expiry,
+            'Expiry_Label': expiry_label,
+            'Days_to_Expiry': int(days),
+            'Futures_Rate': round(futures_rate, 6),
+            'Futures_Rate_Pct': round(futures_rate * 100, 3),
+            'Premium_Over_SOFR_Bps': round(premium_bps, 1),
+            'Price_Bps': price,
+        })
+    
+    df = pd.DataFrame(records)
+    
+    if not df.empty:
+        df = df.sort_values('Days_to_Expiry').reset_index(drop=True)
+    
+    return df
+
+
+def get_combined_rate_data(force_reload: bool = False) -> dict:
+    """
+    Load all rate data needed for the Opportunities page.
+    
+    Returns a dictionary with:
+        - futures_df: Raw futures prices
+        - futures_rates: Processed futures rates
+        - box_spreads: Mock box spread data
+        - sofr_rate: Current SOFR rate
+    
+    Args:
+        force_reload: Force reload from files
+    
+    Returns:
+        Dictionary with all rate data
+    """
+    from modules.opportunities_config import SOFR_RATE
+    
+    futures_df = get_cached_data('futures_prices', force_reload)
+    futures_rates = generate_mock_futures_rates(futures_df, SOFR_RATE)
+    box_spreads = generate_mock_box_spreads(futures_df, SOFR_RATE)
+    
+    return {
+        'futures_df': futures_df,
+        'futures_rates': futures_rates,
+        'box_spreads': box_spreads,
+        'sofr_rate': SOFR_RATE,
+        'sofr_rate_pct': SOFR_RATE * 100,
+    }
