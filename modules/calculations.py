@@ -2032,3 +2032,338 @@ def calculate_basket_calendar_trade_recommendations(
             break
 
     return out
+
+
+# =============================================================================
+# IMPLIED FORWARD RATE / CALENDAR SPREAD CALCULATIONS
+# =============================================================================
+
+def calculate_implied_forward_rate(
+    from_price: float,
+    to_price: float,
+    days_to_from: int,
+    days_to_to: int,
+    days_to_from_static: Optional[int] = None,
+    days_to_to_static: Optional[int] = None
+) -> Optional[float]:
+    """
+    Calculate the implied forward rate between two futures contracts.
+    
+    This is the rate the market is implying for the period BETWEEN the two
+    contract maturities, derived from their current prices.
+    
+    Formula (matches Excel spreadsheet):
+        Forward Rate = (TO_Price - (FROM_Price × Time_Ratio)) ÷ Day_Count_Fraction
+    
+    Where:
+        Time_Ratio = Days_to_FROM / Days_to_TO (dynamic, from delivery dates)
+        Day_Count_Fraction = (Days_to_TO - Days_to_FROM) / Days_to_TO (can use static)
+    
+    The spreadsheet uses a hybrid approach:
+        - Numerator time ratio: calculated from delivery dates (dynamic)
+        - Denominator day count: from static days values (Row 2 / Column A)
+    
+    Args:
+        from_price: Price of the near-dated (FROM) contract in basis points
+        to_price: Price of the far-dated (TO) contract in basis points
+        days_to_from: Days until FROM contract delivery (dynamic, from dates)
+        days_to_to: Days until TO contract delivery (dynamic, from dates)
+        days_to_from_static: Optional static days for FROM (for denominator)
+        days_to_to_static: Optional static days for TO (for denominator)
+    
+    Returns:
+        Implied forward rate in basis points, or None if invalid
+    
+    Example:
+        >>> calculate_implied_forward_rate(
+        ...     from_price=44.5,   # AXWH6 (March) price
+        ...     to_price=51.5,     # AXWM6 (June) price
+        ...     days_to_from=20,   # Days to March delivery
+        ...     days_to_to=110     # Days to June delivery
+        ... )
+        53.54  # Implied forward rate for March→June period
+    """
+    # Use static days for denominator if provided, otherwise use dynamic
+    if days_to_from_static is None:
+        days_to_from_static = days_to_from
+    if days_to_to_static is None:
+        days_to_to_static = days_to_to
+    
+    # Validation: FROM must expire BEFORE TO
+    if days_to_from >= days_to_to:
+        return None
+    
+    # Validation: avoid division by zero
+    if days_to_to <= 0 or days_to_to_static <= 0:
+        return None
+    
+    # Time ratio for numerator: uses DYNAMIC days
+    time_ratio = days_to_from / days_to_to
+    
+    # Day count fraction for denominator: uses STATIC days
+    day_count_fraction = (days_to_to_static - days_to_from_static) / days_to_to_static
+    
+    if day_count_fraction == 0:
+        return None
+    
+    # Numerator: TO price minus time-adjusted FROM price
+    numerator = to_price - (from_price * time_ratio)
+    
+    # Final calculation
+    forward_rate = numerator / day_count_fraction
+    
+    return forward_rate
+
+
+def calculate_calendar_spread_carry(
+    from_price: float,
+    to_price: float,
+    days_between_contracts: int,
+    notional: float,
+    holding_period_days: Optional[int] = None
+) -> dict:
+    """
+    Calculate carry metrics for a calendar spread position.
+    
+    A calendar spread involves:
+        - LONG the near-dated (FROM) contract
+        - SHORT the far-dated (TO) contract
+    
+    Carry is earned as time passes and the spread converges.
+    
+    Args:
+        from_price: Price of near-dated contract (in basis points)
+        to_price: Price of far-dated contract (in basis points)
+        days_between_contracts: Days between the two contract maturities
+        notional: Position notional in USD
+        holding_period_days: Optional holding period (defaults to days_between)
+    
+    Returns:
+        Dictionary with carry metrics:
+            - spread_bps: Initial spread locked in (basis points)
+            - daily_carry_bps: Daily carry in basis points
+            - daily_carry_usd: Daily carry in USD
+            - total_carry_bps: Total carry for holding period (bps)
+            - total_carry_usd: Total carry for holding period (USD)
+            - annualized_carry_bps: Annualized carry rate (bps)
+    
+    Example:
+        >>> calculate_calendar_spread_carry(
+        ...     from_price=44.5,
+        ...     to_price=51.5,
+        ...     days_between_contracts=90,
+        ...     notional=100_000_000,
+        ...     holding_period_days=20
+        ... )
+        {
+            'spread_bps': 7.0,
+            'daily_carry_bps': 0.078,
+            'daily_carry_usd': 7778,
+            'total_carry_bps': 1.56,
+            'total_carry_usd': 155556,
+            'annualized_carry_bps': 28.4
+        }
+    """
+    if holding_period_days is None:
+        holding_period_days = days_between_contracts
+    
+    # Spread locked in at trade inception
+    spread_bps = to_price - from_price
+    
+    # Daily carry (spread earned per day)
+    if days_between_contracts > 0:
+        daily_carry_bps = spread_bps / days_between_contracts
+    else:
+        daily_carry_bps = 0.0
+    
+    # Convert to USD (1 bp = 0.0001)
+    daily_carry_usd = (daily_carry_bps * BASIS_POINT) * abs(notional)
+    
+    # Total carry for holding period
+    total_carry_bps = daily_carry_bps * holding_period_days
+    total_carry_usd = daily_carry_usd * holding_period_days
+    
+    # Annualized carry
+    annualized_carry_bps = daily_carry_bps * 365
+    
+    return {
+        'spread_bps': spread_bps,
+        'daily_carry_bps': round(daily_carry_bps, 5),
+        'daily_carry_usd': round(daily_carry_usd, 2),
+        'total_carry_bps': round(total_carry_bps, 5),
+        'total_carry_usd': round(total_carry_usd, 2),
+        'annualized_carry_bps': round(annualized_carry_bps, 2),
+        'holding_period_days': holding_period_days,
+        'days_between_contracts': days_between_contracts,
+    }
+
+
+def calculate_forward_rate_matrix(
+    contracts_df: pd.DataFrame,
+    price_column: str = 'last_price',
+    days_column: str = 'Days_to_maturity',
+    contract_column: str = 'Contract_Code',
+    maturity_column: str = 'Maturity',
+    as_of_date: Optional[date] = None
+) -> pd.DataFrame:
+    """
+    Calculate a full matrix of implied forward rates between all contract pairs.
+    
+    This recreates the "Mid Spreads" spreadsheet matrix where:
+        - Rows = FROM contracts (the near-dated leg)
+        - Columns = TO contracts (the far-dated leg)
+        - Cell values = Implied forward rate for that period
+    
+    Args:
+        contracts_df: DataFrame with futures contract data containing:
+            - Contract code (e.g., 'AXWH6')
+            - Price (in basis points)
+            - Days to maturity OR Maturity date
+        price_column: Name of the price column
+        days_column: Name of the days-to-maturity column
+        contract_column: Name of the contract code column
+        maturity_column: Name of the maturity date column (optional, for dynamic days)
+        as_of_date: Date for calculating dynamic days (defaults to today)
+    
+    Returns:
+        DataFrame with contract codes as both index and columns,
+        containing implied forward rates (NaN for invalid pairs)
+    
+    Example:
+        >>> df = pd.DataFrame({
+        ...     'Contract_Code': ['AXWH6', 'AXWM6', 'AXWU6'],
+        ...     'last_price': [44.5, 51.5, 54.5],
+        ...     'Days_to_maturity': [20, 110, 202],
+        ...     'Maturity': ['2026-03-20', '2026-06-18', '2026-09-18']
+        ... })
+        >>> matrix = calculate_forward_rate_matrix(df)
+        >>> matrix.loc['AXWH6', 'AXWM6']
+        53.54
+    """
+    if contracts_df.empty:
+        return pd.DataFrame()
+    
+    # Get as_of_date for dynamic day calculation
+    if as_of_date is None:
+        as_of_date = datetime.now().date()
+    
+    # Calculate dynamic days if maturity column exists
+    if maturity_column in contracts_df.columns:
+        contracts_df = contracts_df.copy()
+        contracts_df[maturity_column] = pd.to_datetime(contracts_df[maturity_column])
+        contracts_df['_days_dynamic'] = contracts_df[maturity_column].apply(
+            lambda x: (x.date() - as_of_date).days if pd.notna(x) else None
+        )
+    else:
+        contracts_df = contracts_df.copy()
+        contracts_df['_days_dynamic'] = contracts_df[days_column]
+    
+    # Get list of contracts
+    contracts = contracts_df[contract_column].tolist()
+    n = len(contracts)
+    
+    # Create empty matrix
+    matrix = pd.DataFrame(index=contracts, columns=contracts, dtype=float)
+    
+    # Build lookup for contract data
+    contract_data = {}
+    for _, row in contracts_df.iterrows():
+        code = row[contract_column]
+        contract_data[code] = {
+            'price': row[price_column],
+            'days_static': row[days_column],
+            'days_dynamic': row['_days_dynamic'],
+        }
+    
+    # Fill the matrix
+    for from_contract in contracts:
+        from_data = contract_data[from_contract]
+        from_price = from_data['price']
+        from_days_dynamic = from_data['days_dynamic']
+        from_days_static = from_data['days_static']
+        
+        for to_contract in contracts:
+            to_data = contract_data[to_contract]
+            to_price = to_data['price']
+            to_days_dynamic = to_data['days_dynamic']
+            to_days_static = to_data['days_static']
+            
+            # Skip if any values are missing
+            if pd.isna(from_price) or pd.isna(to_price):
+                continue
+            if pd.isna(from_days_dynamic) or pd.isna(to_days_dynamic):
+                continue
+            
+            # Calculate forward rate
+            fwd_rate = calculate_implied_forward_rate(
+                from_price=from_price,
+                to_price=to_price,
+                days_to_from=int(from_days_dynamic),
+                days_to_to=int(to_days_dynamic),
+                days_to_from_static=int(from_days_static) if pd.notna(from_days_static) else None,
+                days_to_to_static=int(to_days_static) if pd.notna(to_days_static) else None,
+            )
+            
+            matrix.loc[from_contract, to_contract] = fwd_rate
+    
+    return matrix
+
+
+def identify_calendar_spread_opportunities(
+    forward_rate_matrix: pd.DataFrame,
+    threshold_high: float = 100.0,
+    threshold_low: float = 20.0
+) -> list:
+    """
+    Identify potential calendar spread trading opportunities from the forward rate matrix.
+    
+    Opportunities are identified where:
+        - HIGH implied rate: Market may be overpricing the spread (sell opportunity)
+        - LOW implied rate: Market may be underpricing the spread (buy opportunity)
+    
+    Args:
+        forward_rate_matrix: DataFrame from calculate_forward_rate_matrix()
+        threshold_high: Forward rates above this are flagged as "rich" (sell candidates)
+        threshold_low: Forward rates below this are flagged as "cheap" (buy candidates)
+    
+    Returns:
+        List of opportunity dictionaries with:
+            - from_contract: Near-dated contract
+            - to_contract: Far-dated contract
+            - forward_rate: Implied forward rate
+            - signal: 'RICH' or 'CHEAP'
+            - trade_action: 'SELL_SPREAD' or 'BUY_SPREAD'
+    """
+    opportunities = []
+    
+    for from_contract in forward_rate_matrix.index:
+        for to_contract in forward_rate_matrix.columns:
+            rate = forward_rate_matrix.loc[from_contract, to_contract]
+            
+            if pd.isna(rate):
+                continue
+            
+            if rate >= threshold_high:
+                opportunities.append({
+                    'from_contract': from_contract,
+                    'to_contract': to_contract,
+                    'forward_rate': round(rate, 2),
+                    'signal': 'RICH',
+                    'trade_action': 'SELL_SPREAD',
+                    'description': f"Sell {from_contract}/{to_contract} spread - implied rate {rate:.1f} bps is high"
+                })
+            elif rate <= threshold_low:
+                opportunities.append({
+                    'from_contract': from_contract,
+                    'to_contract': to_contract,
+                    'forward_rate': round(rate, 2),
+                    'signal': 'CHEAP',
+                    'trade_action': 'BUY_SPREAD',
+                    'description': f"Buy {from_contract}/{to_contract} spread - implied rate {rate:.1f} bps is low"
+                })
+    
+    # Sort by absolute distance from neutral (most extreme first)
+    neutral = (threshold_high + threshold_low) / 2
+    opportunities.sort(key=lambda x: abs(x['forward_rate'] - neutral), reverse=True)
+    
+    return opportunities
