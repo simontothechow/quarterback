@@ -388,7 +388,8 @@ def get_cached_data(data_type: str, force_reload: bool = False) -> pd.DataFrame:
     Get cached data or load if not cached.
     
     Args:
-        data_type: One of 'positions', 'market_data', 'corp_actions', 'earnings', 'market_events'
+        data_type: One of 'positions', 'market_data', 'corp_actions', 'earnings', 
+                   'market_events', 'futures_prices'
         force_reload: Force reload from file even if cached
     
     Returns:
@@ -407,6 +408,8 @@ def get_cached_data(data_type: str, force_reload: bool = False) -> pd.DataFrame:
             _cache[data_type] = load_top50_earnings()
         elif data_type == 'market_events':
             _cache[data_type] = load_market_events()
+        elif data_type == 'futures_prices':
+            _cache[data_type] = load_futures_prices()
         else:
             raise ValueError(f"Unknown data type: {data_type}")
     
@@ -481,3 +484,54 @@ def get_cash_positions(positions_df: pd.DataFrame, basket_id: str) -> pd.DataFra
     mask = (positions_df['BASKET_ID'] == basket_id) & \
            (positions_df['POSITION_TYPE'].isin(['CASH_BORROW', 'CASH_LEND']))
     return positions_df[mask].copy()
+
+
+def load_futures_prices(file_path: Optional[str] = None) -> pd.DataFrame:
+    """
+    Load S&P 500 AIR futures prices data for calendar spread analysis.
+    
+    This data is used by the Markets page to calculate implied forward rates
+    and identify calendar spread trading opportunities.
+    
+    Args:
+        file_path: Optional custom path to futures prices file.
+                   Defaults to data/futures_prices.xlsx
+    
+    Returns:
+        DataFrame with futures price data
+    
+    Expected columns:
+        - Contract_Code: Futures contract identifier (e.g., 'AXWH6' for March 2026)
+        - Days_to_maturity: Days until contract delivery
+        - last_price: Current futures price in basis points
+        - Maturity: Contract maturity/delivery date
+    
+    Contract Code Convention:
+        - AXW = S&P 500 AIR futures root
+        - H = March, M = June, U = September, Z = December
+        - 6 = 2026, 7 = 2027, etc.
+    """
+    if file_path is None:
+        file_path = DATA_PATH / "futures_prices.xlsx"
+    
+    if not Path(file_path).exists():
+        # Return empty DataFrame if file doesn't exist
+        return pd.DataFrame(columns=['Contract_Code', 'Days_to_maturity', 'last_price', 'Maturity'])
+    
+    df = pd.read_excel(file_path)
+    
+    # Parse maturity date column
+    if 'Maturity' in df.columns:
+        df['Maturity'] = pd.to_datetime(df['Maturity'], errors='coerce')
+    
+    # Ensure numeric columns are properly typed
+    numeric_columns = ['Days_to_maturity', 'last_price']
+    for col in numeric_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    # Sort by days to maturity (nearest first)
+    if 'Days_to_maturity' in df.columns:
+        df = df.sort_values('Days_to_maturity', na_position='last')
+    
+    return df

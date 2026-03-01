@@ -57,6 +57,9 @@ quick_futures_page = st.Page("pages/10_📊_Quick_Futures.py", title="Quick Futu
 quick_equity_page = st.Page("pages/11_📈_Quick_Equity.py", title="Quick Equity", icon="📈")
 quick_cash_page = st.Page("pages/12_💰_Quick_Cash.py", title="Quick Cash", icon="💰")
 
+# Markets page (calendar spread opportunity scanner)
+markets_page = st.Page("pages/13_🌐_Markets.py", title="Markets", icon="🌐")
+
 # Hidden pages (accessible via st.switch_page but NOT shown in sidebar)
 hidden_basket_txn = st.Page("pages/__Basket_Transaction.py", title="Basket Transaction")
 hidden_futures_txn = st.Page("pages/__Futures_Transaction.py", title="Futures Transaction")
@@ -85,6 +88,7 @@ pg = st.navigation(
     {
         "Main": [home_page, basket_detail_page, calendar_page, transactions_page, new_basket_page],
         "Quick Trades": [quick_futures_page, quick_equity_page, quick_cash_page],
+        "Markets": [markets_page],
         "Hidden": [hidden_basket_txn, hidden_futures_txn, hidden_cash_txn, hidden_equity_txn, hidden_transaction],
     },
     position="sidebar"

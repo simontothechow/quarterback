@@ -15,7 +15,43 @@ import numpy as np
 from datetime import datetime, date, timedelta
 from typing import Optional, Union, Tuple
 
-# Constants
+# =============================================================================
+# DEMO MODE CONFIGURATION
+# =============================================================================
+# Toggle between DEMO mode (fixed date) and LIVE mode (current date)
+# DEMO MODE: Uses a fixed valuation date for consistent demo presentations
+# LIVE MODE: Uses real-time current date for production trading
+
+DEMO_MODE = True
+DEMO_VALUATION_DATE = date(2026, 2, 27)  # Fixed date for Markets page demo
+
+
+def get_valuation_date() -> date:
+    """
+    Get the current valuation date for calculations.
+    
+    In DEMO mode, returns a fixed date for consistent demo presentations.
+    In LIVE mode, returns the current date.
+    
+    This function should be used by the Markets page and any forward rate
+    calculations that need a consistent "as of" date.
+    
+    Returns:
+        date: The valuation date to use for calculations
+    
+    Example:
+        >>> val_date = get_valuation_date()
+        >>> days_to_maturity = (maturity_date - val_date).days
+    """
+    if DEMO_MODE:
+        return DEMO_VALUATION_DATE
+    else:
+        return datetime.now().date()
+
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
 DAYS_IN_YEAR = 360  # Money market convention
 BASIS_POINT = 0.0001  # 1 basis point = 0.01%
 ALERT_THRESHOLD_USD = 100_000  # Net equity notional threshold for alerts
@@ -2365,5 +2401,207 @@ def identify_calendar_spread_opportunities(
     # Sort by absolute distance from neutral (most extreme first)
     neutral = (threshold_high + threshold_low) / 2
     opportunities.sort(key=lambda x: abs(x['forward_rate'] - neutral), reverse=True)
+    
+    return opportunities
+
+
+def calculate_carry_matrix(
+    contracts_df: pd.DataFrame,
+    price_column: str = 'last_price',
+    days_column: str = 'Days_to_maturity',
+    contract_column: str = 'Contract_Code',
+    maturity_column: str = 'Maturity',
+    as_of_date: Optional[date] = None
+) -> pd.DataFrame:
+    """
+    Calculate a matrix of annualized carry (in basis points) for all contract pairs.
+    
+    This is parallel to calculate_forward_rate_matrix() but returns annualized
+    carry instead of forward rates. Carry represents the profit potential from
+    holding a calendar spread position.
+    
+    Args:
+        contracts_df: DataFrame with futures contract data
+        price_column: Name of the price column
+        days_column: Name of the days-to-maturity column
+        contract_column: Name of the contract code column
+        maturity_column: Name of the maturity date column
+        as_of_date: Date for calculations (defaults to get_valuation_date())
+    
+    Returns:
+        DataFrame with contract codes as both index and columns,
+        containing annualized carry in basis points (NaN for invalid pairs)
+    
+    Example:
+        >>> matrix = calculate_carry_matrix(contracts_df)
+        >>> matrix.loc['AXWH6', 'AXWM6']
+        28.4  # Annualized carry of ~28 bps/year for Mar->Jun spread
+    """
+    if contracts_df.empty:
+        return pd.DataFrame()
+    
+    # Get as_of_date
+    if as_of_date is None:
+        as_of_date = get_valuation_date()
+    
+    # Calculate dynamic days if maturity column exists
+    if maturity_column in contracts_df.columns:
+        contracts_df = contracts_df.copy()
+        contracts_df[maturity_column] = pd.to_datetime(contracts_df[maturity_column])
+        contracts_df['_days_dynamic'] = contracts_df[maturity_column].apply(
+            lambda x: (x.date() - as_of_date).days if pd.notna(x) else None
+        )
+    else:
+        contracts_df = contracts_df.copy()
+        contracts_df['_days_dynamic'] = contracts_df[days_column]
+    
+    # Get list of contracts
+    contracts = contracts_df[contract_column].tolist()
+    
+    # Create empty matrix
+    matrix = pd.DataFrame(index=contracts, columns=contracts, dtype=float)
+    
+    # Build lookup for contract data
+    contract_data = {}
+    for _, row in contracts_df.iterrows():
+        code = row[contract_column]
+        contract_data[code] = {
+            'price': row[price_column],
+            'days_dynamic': row['_days_dynamic'],
+        }
+    
+    # Fill the matrix with annualized carry
+    for from_contract in contracts:
+        from_data = contract_data[from_contract]
+        from_price = from_data['price']
+        from_days = from_data['days_dynamic']
+        
+        for to_contract in contracts:
+            to_data = contract_data[to_contract]
+            to_price = to_data['price']
+            to_days = to_data['days_dynamic']
+            
+            # Skip if any values are missing
+            if pd.isna(from_price) or pd.isna(to_price):
+                continue
+            if pd.isna(from_days) or pd.isna(to_days):
+                continue
+            
+            # FROM must be before TO for valid carry calculation
+            if from_days >= to_days:
+                continue
+            
+            # Calculate days between contracts
+            days_between = int(to_days) - int(from_days)
+            
+            if days_between <= 0:
+                continue
+            
+            # Calculate spread (carry in basis points for the period)
+            spread_bps = to_price - from_price
+            
+            # Annualize the carry
+            annualized_carry = (spread_bps / days_between) * 365
+            
+            matrix.loc[from_contract, to_contract] = round(annualized_carry, 2)
+    
+    return matrix
+
+
+def filter_opportunities_by_criteria(
+    forward_rate_matrix: pd.DataFrame,
+    carry_matrix: pd.DataFrame,
+    contracts_df: pd.DataFrame,
+    min_forward_rate: Optional[float] = None,
+    min_annualized_carry: Optional[float] = None,
+    min_maturity_days: Optional[int] = None,
+    max_maturity_days: Optional[int] = None,
+    contract_column: str = 'Contract_Code',
+    days_column: str = 'Days_to_maturity',
+    maturity_column: str = 'Maturity',
+    as_of_date: Optional[date] = None
+) -> list:
+    """
+    Filter calendar spread opportunities based on trader criteria.
+    
+    Args:
+        forward_rate_matrix: DataFrame from calculate_forward_rate_matrix()
+        carry_matrix: DataFrame from calculate_carry_matrix()
+        contracts_df: Original contracts DataFrame with maturity info
+        min_forward_rate: Minimum implied forward rate (bps)
+        min_annualized_carry: Minimum annualized carry (bps/year)
+        min_maturity_days: Minimum days for the forward period
+        max_maturity_days: Maximum days for the forward period
+        contract_column: Name of contract code column
+        days_column: Name of days-to-maturity column
+        maturity_column: Name of maturity date column
+        as_of_date: Date for calculations
+    
+    Returns:
+        List of opportunity dictionaries matching all criteria, sorted by forward rate
+    """
+    if as_of_date is None:
+        as_of_date = get_valuation_date()
+    
+    # Build contract lookup
+    contract_days = {}
+    if maturity_column in contracts_df.columns:
+        contracts_df_copy = contracts_df.copy()
+        contracts_df_copy[maturity_column] = pd.to_datetime(contracts_df_copy[maturity_column])
+        for _, row in contracts_df_copy.iterrows():
+            code = row[contract_column]
+            mat_date = row[maturity_column]
+            if pd.notna(mat_date):
+                contract_days[code] = (mat_date.date() - as_of_date).days
+    else:
+        for _, row in contracts_df.iterrows():
+            code = row[contract_column]
+            contract_days[code] = row[days_column]
+    
+    opportunities = []
+    
+    for from_contract in forward_rate_matrix.index:
+        for to_contract in forward_rate_matrix.columns:
+            fwd_rate = forward_rate_matrix.loc[from_contract, to_contract]
+            carry = carry_matrix.loc[from_contract, to_contract]
+            
+            # Skip invalid entries
+            if pd.isna(fwd_rate) or pd.isna(carry):
+                continue
+            
+            # Get days for the forward period
+            from_days = contract_days.get(from_contract)
+            to_days = contract_days.get(to_contract)
+            
+            if from_days is None or to_days is None:
+                continue
+            
+            period_days = to_days - from_days
+            
+            # Apply filters
+            if min_forward_rate is not None and fwd_rate < min_forward_rate:
+                continue
+            
+            if min_annualized_carry is not None and carry < min_annualized_carry:
+                continue
+            
+            if min_maturity_days is not None and period_days < min_maturity_days:
+                continue
+            
+            if max_maturity_days is not None and period_days > max_maturity_days:
+                continue
+            
+            opportunities.append({
+                'from_contract': from_contract,
+                'to_contract': to_contract,
+                'forward_rate': round(fwd_rate, 2),
+                'annualized_carry': round(carry, 2),
+                'period_days': period_days,
+                'from_days': from_days,
+                'to_days': to_days,
+            })
+    
+    # Sort by forward rate (highest first)
+    opportunities.sort(key=lambda x: x['forward_rate'], reverse=True)
     
     return opportunities
